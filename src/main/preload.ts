@@ -12,87 +12,102 @@ function createEventListener<T>(channel: string) {
   };
 }
 
+/**
+ * Unwrap IPC responses: handlers return {success, data, error}.
+ * The renderer expects raw data, so we extract .data or throw on failure.
+ */
+async function invoke(channel: string, ...args: unknown[]): Promise<any> {
+  const result = await ipcRenderer.invoke(channel, ...args);
+  // If the handler returned a wrapped response, unwrap it
+  if (result && typeof result === 'object' && 'success' in result) {
+    if (result.success) {
+      return result.data;
+    }
+    throw new Error(result.error ?? `IPC call ${channel} failed`);
+  }
+  // Raw value — return as-is
+  return result;
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   // Discovery
   scanSubnet: (subnet: string) =>
-    ipcRenderer.invoke('discovery:scanSubnet', subnet),
+    invoke('discovery:scanSubnet', subnet),
   getDiscoveredSwitches: () =>
-    ipcRenderer.invoke('discovery:getDiscoveredSwitches'),
-  // Alias used by the renderer hooks (useElectronAPI / ScannerView)
+    invoke('discovery:getDiscoveredSwitches'),
   getSwitches: () =>
-    ipcRenderer.invoke('discovery:getDiscoveredSwitches'),
+    invoke('discovery:getDiscoveredSwitches'),
   getDiscoveredDevices: () =>
-    ipcRenderer.invoke('discovery:getDiscoveredDevices'),
-  startPolling: (intervalMs: number) =>
-    ipcRenderer.invoke('discovery:startPolling', intervalMs),
-  stopPolling: () =>
-    ipcRenderer.invoke('discovery:stopPolling'),
+    invoke('discovery:getDiscoveredDevices'),
   getLocalSubnets: () =>
-    ipcRenderer.invoke('discovery:getLocalSubnets'),
+    invoke('discovery:getLocalSubnets'),
+  startPolling: (intervalMs: number) =>
+    invoke('discovery:startPolling', intervalMs),
+  stopPolling: () =>
+    invoke('discovery:stopPolling'),
+
+  // Utility
+  pingSwitch: (ip: string) =>
+    invoke('troubleshoot:pingHost', ip),
+  openWebUI: (ip: string) =>
+    invoke('utility:openWebUI', ip),
+  exportCSV: () =>
+    invoke('utility:exportCSV'),
 
   // Config
   applyProfile: (switchId: string, profileId: string) =>
-    ipcRenderer.invoke('config:applyProfile', switchId, profileId),
+    invoke('config:applyProfile', switchId, profileId),
   backupSwitch: (switchId: string) =>
-    ipcRenderer.invoke('config:backupSwitch', switchId),
+    invoke('config:backupSwitch', switchId),
   restoreSwitch: (switchId: string, backupPath: string) =>
-    ipcRenderer.invoke('config:restoreSwitch', switchId, backupPath),
+    invoke('config:restoreSwitch', switchId, backupPath),
 
   // Excel
   generateTemplate: (model: string) =>
-    ipcRenderer.invoke('excel:generateTemplate', model),
+    invoke('excel:generateTemplate', model),
   parseExcelFile: (filePath: string) =>
-    ipcRenderer.invoke('excel:parseExcelFile', filePath),
+    invoke('excel:parseExcelFile', filePath),
 
   // Database
   queryEventLog: (filters?: Record<string, unknown>) =>
-    ipcRenderer.invoke('database:queryEventLog', filters),
+    invoke('database:queryEventLog', filters),
   getPortStats: (switchMac: string, port: number) =>
-    ipcRenderer.invoke('database:getPortStats', switchMac, port),
+    invoke('database:getPortStats', switchMac, port),
 
   // Rack Map
   getRackGroups: () =>
-    ipcRenderer.invoke('rackMap:getRackGroups'),
+    invoke('rackMap:getRackGroups'),
   saveRackLayout: (layout: unknown) =>
-    ipcRenderer.invoke('rackMap:saveRackLayout', layout),
+    invoke('rackMap:saveRackLayout', layout),
   exportLayoutJson: () =>
-    ipcRenderer.invoke('rackMap:exportLayoutJson'),
+    invoke('rackMap:exportLayoutJson'),
   importLayoutJson: (json: string) =>
-    ipcRenderer.invoke('rackMap:importLayoutJson', json),
+    invoke('rackMap:importLayoutJson', json),
 
   // Profiles
   listProfiles: () =>
-    ipcRenderer.invoke('profiles:listProfiles'),
+    invoke('profiles:listProfiles'),
   saveProfile: (profile: unknown) =>
-    ipcRenderer.invoke('profiles:saveProfile', profile),
+    invoke('profiles:saveProfile', profile),
   deleteProfile: (profileId: string) =>
-    ipcRenderer.invoke('profiles:deleteProfile', profileId),
+    invoke('profiles:deleteProfile', profileId),
 
   // Troubleshoot
   runHealthChecks: (switchIds: string[]) =>
-    ipcRenderer.invoke('troubleshoot:runHealthChecks', switchIds),
+    invoke('troubleshoot:runHealthChecks', switchIds),
   pingHost: (host: string) =>
-    ipcRenderer.invoke('troubleshoot:pingHost', host),
-  // Alias used by the renderer hooks (useElectronAPI / ScannerView)
-  pingSwitch: (ip: string) =>
-    ipcRenderer.invoke('troubleshoot:pingHost', ip),
+    invoke('troubleshoot:pingHost', host),
   compareSwitches: (switchIdA: string, switchIdB: string) =>
-    ipcRenderer.invoke('troubleshoot:compareSwitches', switchIdA, switchIdB),
+    invoke('troubleshoot:compareSwitches', switchIdA, switchIdB),
   resetCounters: (switchId: string) =>
-    ipcRenderer.invoke('troubleshoot:resetCounters', switchId),
-
-  // Utility
-  openWebUI: (ip: string) =>
-    ipcRenderer.invoke('utility:openWebUI', ip),
-  exportCSV: () =>
-    ipcRenderer.invoke('utility:exportCSV'),
+    invoke('troubleshoot:resetCounters', switchId),
 
   // Events (main -> renderer)
   onSwitchDiscovered: createEventListener('event:switchDiscovered'),
   onSwitchLost: createEventListener('event:switchLost'),
+  onSwitchUpdate: createEventListener('event:switchUpdate'),
+  onScanProgress: createEventListener<number>('event:scanProgress'),
   onPortChange: createEventListener('event:portChange'),
   onHealthAlert: createEventListener('event:healthAlert'),
   onLogEvent: createEventListener('event:logEvent'),
-  onScanProgress: createEventListener<number>('event:scanProgress'),
-  onSwitchUpdate: createEventListener('event:switchUpdate'),
 });
