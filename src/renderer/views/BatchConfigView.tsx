@@ -1,19 +1,913 @@
-import React from 'react';
-import { Layers } from 'lucide-react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import {
+  Layers,
+  Network,
+  Tag,
+  Radio,
+  Zap,
+  Type,
+  Globe,
+  FolderInput,
+  HardDrive,
+  Settings,
+  AlertTriangle,
+  RotateCcw,
+  Power,
+} from 'lucide-react';
+import type { DiscoveredSwitch, HealthStatus } from '@shared/types';
+import { BatchSelector } from '../components/BatchSelector';
+import { BatchPreview } from '../components/BatchPreview';
+import type { BatchOperationPreview } from '../components/BatchPreview';
+import { BatchProgress } from '../components/BatchProgress';
+import type { BatchSwitchStatus } from '../components/BatchProgress';
+import { GroupConfigForm } from '../components/GroupConfigForm';
+import type { GroupRow } from '../components/GroupConfigForm';
+import { SequentialNaming } from '../components/SequentialNaming';
+import type { NamingAssignment } from '../components/SequentialNaming';
+import { SequentialIP } from '../components/SequentialIP';
+import type { IPAssignment } from '../components/SequentialIP';
+import { FirmwareUploader } from '../components/FirmwareUploader';
+import type { FirmwareFileInfo } from '../components/FirmwareUploader';
+
+// ─── Mock Data ──────────────────────────────────────────────────────────────
+
+const MOCK_SWITCHES: DiscoveredSwitch[] = [
+  {
+    id: 'sw-001', name: 'FOH-Main-01', model: 'GC-30i', ip: '10.0.1.10', mac: '00:50:C2:00:01:01',
+    firmware: '2.8.1', generation: 2, serial: 'GC30-20240101', isOnline: true,
+    lastSeen: '2026-03-18T10:00:00Z', firstSeen: '2026-01-15T08:00:00Z',
+    rackGroup: 'FOH Rack A', portCount: 30, portsUp: 24, healthStatus: 'healthy',
+    poeTotal: 370, poeBudget: 500,
+  },
+  {
+    id: 'sw-002', name: 'FOH-Main-02', model: 'GC-30i', ip: '10.0.1.11', mac: '00:50:C2:00:01:02',
+    firmware: '2.8.1', generation: 2, serial: 'GC30-20240102', isOnline: true,
+    lastSeen: '2026-03-18T10:00:00Z', firstSeen: '2026-01-15T08:00:00Z',
+    rackGroup: 'FOH Rack A', portCount: 30, portsUp: 18, healthStatus: 'healthy',
+    poeTotal: 280, poeBudget: 500,
+  },
+  {
+    id: 'sw-003', name: 'Stage-Left-01', model: 'GC-16t', ip: '10.0.1.20', mac: '00:50:C2:00:02:01',
+    firmware: '2.7.3', generation: 2, serial: 'GC16-20240201', isOnline: true,
+    lastSeen: '2026-03-18T10:00:00Z', firstSeen: '2026-02-01T08:00:00Z',
+    rackGroup: 'Stage Left', portCount: 16, portsUp: 12, healthStatus: 'healthy',
+    poeTotal: 120, poeBudget: 240,
+  },
+  {
+    id: 'sw-004', name: 'Stage-Right-01', model: 'GC-16t', ip: '10.0.1.21', mac: '00:50:C2:00:02:02',
+    firmware: '2.7.3', generation: 2, serial: 'GC16-20240202', isOnline: true,
+    lastSeen: '2026-03-18T10:00:00Z', firstSeen: '2026-02-01T08:00:00Z',
+    rackGroup: 'Stage Right', portCount: 16, portsUp: 10, healthStatus: 'warning',
+    poeTotal: 190, poeBudget: 240,
+  },
+  {
+    id: 'sw-005', name: 'Monitor-01', model: 'GC-14R', ip: '10.0.1.30', mac: '00:50:C2:00:03:01',
+    firmware: '2.8.0', generation: 2, serial: 'GC14-20240301', isOnline: true,
+    lastSeen: '2026-03-18T10:00:00Z', firstSeen: '2026-02-15T08:00:00Z',
+    rackGroup: 'Monitor World', portCount: 14, portsUp: 8, healthStatus: 'healthy',
+  },
+  {
+    id: 'sw-006', name: 'Broadcast-01', model: 'GC-10i', ip: '10.0.1.40', mac: '00:50:C2:00:04:01',
+    firmware: '2.8.1', generation: 2, serial: 'GC10-20240401', isOnline: true,
+    lastSeen: '2026-03-18T10:00:00Z', firstSeen: '2026-03-01T08:00:00Z',
+    rackGroup: 'Broadcast', portCount: 10, portsUp: 6, healthStatus: 'healthy',
+  },
+  {
+    id: 'sw-007', name: 'Backup-01', model: 'GC-12t', ip: '10.0.1.50', mac: '00:50:C2:00:05:01',
+    firmware: '2.6.0', generation: 1, serial: 'GC12-20230501', isOnline: false,
+    lastSeen: '2026-03-17T22:00:00Z', firstSeen: '2023-06-01T08:00:00Z',
+    rackGroup: 'FOH Rack A', portCount: 12, portsUp: 0, healthStatus: 'offline',
+  },
+  {
+    id: 'sw-008', name: 'Stage-DSP-01', model: 'GC-14R', ip: '10.0.1.31', mac: '00:50:C2:00:03:02',
+    firmware: '2.8.0', generation: 2, serial: 'GC14-20240302', isOnline: true,
+    lastSeen: '2026-03-18T10:00:00Z', firstSeen: '2026-02-15T08:00:00Z',
+    rackGroup: 'Stage Left', portCount: 14, portsUp: 11, healthStatus: 'critical',
+    poeTotal: 50, poeBudget: 150,
+  },
+];
+
+// ─── Tab Configuration ──────────────────────────────────────────────────────
+
+type TabId =
+  | 'groups'
+  | 'ports'
+  | 'igmp'
+  | 'poe'
+  | 'naming'
+  | 'ip'
+  | 'profile'
+  | 'firmware'
+  | 'system';
+
+interface TabDef {
+  id: TabId;
+  label: string;
+  icon: React.ReactNode;
+}
+
+const TABS: TabDef[] = [
+  { id: 'groups', label: 'Groups/VLANs', icon: <Network className="w-4 h-4" /> },
+  { id: 'ports', label: 'Port Assignment', icon: <Tag className="w-4 h-4" /> },
+  { id: 'igmp', label: 'IGMP', icon: <Radio className="w-4 h-4" /> },
+  { id: 'poe', label: 'PoE', icon: <Zap className="w-4 h-4" /> },
+  { id: 'naming', label: 'Naming', icon: <Type className="w-4 h-4" /> },
+  { id: 'ip', label: 'IP Addressing', icon: <Globe className="w-4 h-4" /> },
+  { id: 'profile', label: 'Profile Deploy', icon: <FolderInput className="w-4 h-4" /> },
+  { id: 'firmware', label: 'Firmware', icon: <HardDrive className="w-4 h-4" /> },
+  { id: 'system', label: 'System', icon: <Settings className="w-4 h-4" /> },
+];
+
+// ─── Helper: generate preview for group config ──────────────────────────────
+
+function buildGroupPreview(
+  groups: GroupRow[],
+  selectedSwitches: DiscoveredSwitch[]
+): BatchOperationPreview[] {
+  return selectedSwitches.map((sw) => ({
+    switchName: sw.name,
+    switchIp: sw.ip,
+    changes: groups.map((g) => ({
+      field: `Group ${g.groupNumber} (${g.name})`,
+      currentValue: '(none)',
+      newValue: `VLAN ${g.vlanId}, IGMP: ${g.igmpSnooping ? 'on' : 'off'}`,
+      type: 'add' as const,
+    })),
+  }));
+}
+
+function buildNamingPreview(assignments: NamingAssignment[]): BatchOperationPreview[] {
+  return assignments.map((a) => ({
+    switchName: a.currentName,
+    switchIp: '',
+    changes: [
+      {
+        field: 'Switch Name',
+        currentValue: a.currentName,
+        newValue: a.newName,
+        type: 'change' as const,
+      },
+    ],
+  }));
+}
+
+function buildIPPreview(assignments: IPAssignment[]): BatchOperationPreview[] {
+  return assignments.map((a) => ({
+    switchName: a.switchName,
+    switchIp: a.currentIp,
+    changes: [
+      {
+        field: 'IP Address',
+        currentValue: a.currentIp,
+        newValue: a.newIp,
+        type: a.currentIp === a.newIp ? ('change' as const) : ('change' as const),
+      },
+    ],
+  }));
+}
+
+function buildFirmwarePreview(
+  file: FirmwareFileInfo,
+  selectedSwitches: DiscoveredSwitch[]
+): BatchOperationPreview[] {
+  const compatible = selectedSwitches.filter((s) =>
+    file.compatibleModels.includes(s.model)
+  );
+  return compatible.map((sw) => ({
+    switchName: sw.name,
+    switchIp: sw.ip,
+    changes: [
+      {
+        field: 'Firmware',
+        currentValue: sw.firmware,
+        newValue: file.name.replace(/\.(bin|fw|img)$/, ''),
+        type: 'change' as const,
+      },
+    ],
+  }));
+}
+
+// ─── Component ──────────────────────────────────────────────────────────────
 
 export default function BatchConfigView() {
-  return (
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [activeTab, setActiveTab] = useState<TabId>('groups');
+  const [groupBy, setGroupBy] = useState<'model' | 'rack' | 'none'>('rack');
+
+  // Preview / progress state
+  const [previewData, setPreviewData] = useState<BatchOperationPreview[] | null>(null);
+  const [previewReviewed, setPreviewReviewed] = useState(false);
+  const [isDestructive, setIsDestructive] = useState(false);
+  const [previewLabel, setPreviewLabel] = useState('');
+
+  // Execution state
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [batchStatuses, setBatchStatuses] = useState<BatchSwitchStatus[]>([]);
+  const [overallProgress, setOverallProgress] = useState(0);
+  const [executionLog, setExecutionLog] = useState<string[]>([]);
+  const executionTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const selectedSwitches = MOCK_SWITCHES.filter((s) => selectedIds.has(s.id));
+
+  // ─── Preview handlers ─────────────────────────────────────────────────
+
+  const showPreview = useCallback(
+    (operations: BatchOperationPreview[], label: string, destructive = false) => {
+      setPreviewData(operations);
+      setPreviewLabel(label);
+      setIsDestructive(destructive);
+      setPreviewReviewed(false);
+    },
+    []
+  );
+
+  const confirmPreview = useCallback(() => {
+    setPreviewReviewed(true);
+    setPreviewData(null);
+  }, []);
+
+  const cancelPreview = useCallback(() => {
+    setPreviewData(null);
+  }, []);
+
+  // ─── Simulated execution ──────────────────────────────────────────────
+
+  const simulateExecution = useCallback(() => {
+    if (selectedSwitches.length === 0) return;
+
+    setIsExecuting(true);
+    setPreviewReviewed(false);
+    const statuses: BatchSwitchStatus[] = selectedSwitches.map((sw) => ({
+      switchName: sw.name,
+      switchIp: sw.ip,
+      status: 'waiting',
+      progress: 0,
+    }));
+    setBatchStatuses(statuses);
+    setOverallProgress(0);
+    setExecutionLog([`[INFO] Starting batch operation on ${selectedSwitches.length} switches...`]);
+
+    let currentIdx = 0;
+    let tickCount = 0;
+
+    executionTimer.current = setInterval(() => {
+      tickCount++;
+
+      setBatchStatuses((prev) => {
+        const next = [...prev];
+        if (currentIdx < next.length) {
+          const sw = next[currentIdx];
+          if (sw.status === 'waiting') {
+            sw.status = 'in-progress';
+            sw.progress = 0;
+            sw.currentOperation = 'Connecting...';
+            setExecutionLog((l) => [...l, `[INFO] Connecting to ${sw.switchName} (${sw.switchIp})...`]);
+          } else if (sw.status === 'in-progress') {
+            sw.progress = Math.min(sw.progress + 20 + Math.random() * 15, 100);
+            if (sw.progress < 40) {
+              sw.currentOperation = 'Authenticating...';
+            } else if (sw.progress < 70) {
+              sw.currentOperation = 'Applying configuration...';
+            } else if (sw.progress < 95) {
+              sw.currentOperation = 'Verifying changes...';
+            }
+
+            if (sw.progress >= 100) {
+              // Simulate occasional failure
+              if (sw.switchName === 'Backup-01') {
+                sw.status = 'failed';
+                sw.error = 'Connection refused: switch offline';
+                sw.progress = 100;
+                setExecutionLog((l) => [
+                  ...l,
+                  `[ERROR] Failed to configure ${sw.switchName}: Connection refused`,
+                ]);
+              } else {
+                sw.status = 'success';
+                sw.progress = 100;
+                setExecutionLog((l) => [
+                  ...l,
+                  `[OK] ${sw.switchName} configured successfully`,
+                ]);
+              }
+              currentIdx++;
+            }
+          }
+        }
+
+        // Calculate overall progress
+        const completed = next.filter(
+          (s) => s.status === 'success' || s.status === 'failed' || s.status === 'skipped'
+        ).length;
+        const inProgressPct =
+          next.find((s) => s.status === 'in-progress')?.progress || 0;
+        const pct = ((completed + inProgressPct / 100) / next.length) * 100;
+        setOverallProgress(Math.min(pct, 100));
+
+        // Check if done
+        if (currentIdx >= next.length && !next.some((s) => s.status === 'in-progress')) {
+          if (executionTimer.current) {
+            clearInterval(executionTimer.current);
+            executionTimer.current = null;
+          }
+          setIsExecuting(false);
+          const successCount = next.filter((s) => s.status === 'success').length;
+          const failCount = next.filter((s) => s.status === 'failed').length;
+          setExecutionLog((l) => [
+            ...l,
+            `[INFO] Batch operation complete: ${successCount} succeeded, ${failCount} failed`,
+          ]);
+          setOverallProgress(100);
+        }
+
+        return next;
+      });
+    }, 600);
+  }, [selectedSwitches]);
+
+  const handleAbort = useCallback(() => {
+    if (executionTimer.current) {
+      clearInterval(executionTimer.current);
+      executionTimer.current = null;
+    }
+    setIsExecuting(false);
+    setBatchStatuses((prev) =>
+      prev.map((s) =>
+        s.status === 'waiting' || s.status === 'in-progress'
+          ? { ...s, status: 'skipped', progress: s.progress }
+          : s
+      )
+    );
+    setExecutionLog((l) => [...l, '[WARN] Batch operation aborted by user']);
+    setOverallProgress(100);
+  }, []);
+
+  const handleRollback = useCallback(() => {
+    setExecutionLog((l) => [...l, '[INFO] Rollback initiated for failed switches...']);
+    // In a real app this would trigger rollback logic
+    setTimeout(() => {
+      setExecutionLog((l) => [...l, '[OK] Rollback complete']);
+    }, 1000);
+  }, []);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (executionTimer.current) clearInterval(executionTimer.current);
+    };
+  }, []);
+
+  const resetExecution = () => {
+    setBatchStatuses([]);
+    setOverallProgress(0);
+    setExecutionLog([]);
+  };
+
+  const showingProgress = batchStatuses.length > 0;
+
+  // ─── Tab content renderers ────────────────────────────────────────────
+
+  const renderGroupsTab = () => (
+    <GroupConfigForm
+      onPreview={(groups) => showPreview(buildGroupPreview(groups, selectedSwitches), 'Group/VLAN Configuration')}
+      onApply={() => simulateExecution()}
+      previewReviewed={previewReviewed}
+    />
+  );
+
+  const renderPortsTab = () => (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
+      <h4 className="text-sm font-medium text-white">Port Assignment</h4>
+      <p className="text-xs text-gray-400">Assign port ranges to groups across the fleet</p>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Port Range</label>
+          <input
+            type="text"
+            defaultValue="1-8"
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Assign to Group</label>
+          <select className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent">
+            <option>Group 1 - Control</option>
+            <option>Group 2 - Audio Primary</option>
+            <option>Group 3 - Audio Secondary</option>
+            <option>Group 4 - Video</option>
+            <option>Group 5 - Lighting</option>
+            <option>Group 6 - Intercom</option>
+          </select>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Port Range</label>
+          <input
+            type="text"
+            defaultValue="9-16"
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Assign to Group</label>
+          <select className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent">
+            <option>Group 2 - Audio Primary</option>
+            <option>Group 1 - Control</option>
+            <option>Group 3 - Audio Secondary</option>
+            <option>Group 4 - Video</option>
+            <option>Group 5 - Lighting</option>
+            <option>Group 6 - Intercom</option>
+          </select>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 pt-4 border-t border-gray-700">
+        <button
+          onClick={() =>
+            showPreview(
+              selectedSwitches.map((sw) => ({
+                switchName: sw.name,
+                switchIp: sw.ip,
+                changes: [
+                  { field: 'Ports 1-8', currentValue: 'Group 1', newValue: 'Group 1 - Control', type: 'change' as const },
+                  { field: 'Ports 9-16', currentValue: 'Group 1', newValue: 'Group 2 - Audio Primary', type: 'change' as const },
+                ],
+              })),
+              'Port Assignment'
+            )
+          }
+          className="px-4 py-2 text-sm font-medium bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+        >
+          Preview Changes
+        </button>
+        <button
+          onClick={simulateExecution}
+          disabled={!previewReviewed}
+          className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+            previewReviewed ? 'bg-gc-accent text-white hover:bg-gc-accent/80' : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+          }`}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderIGMPTab = () => (
+    <div className="space-y-4">
+      <h4 className="text-sm font-medium text-white">IGMP Settings</h4>
+      <p className="text-xs text-gray-400">Enable or disable IGMP snooping, querier, and flooding per group</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-xs text-gray-500 uppercase tracking-wider">
+              <th className="text-left py-2 px-3">Group</th>
+              <th className="text-center py-2 px-3">Snooping</th>
+              <th className="text-center py-2 px-3">Querier</th>
+              <th className="text-center py-2 px-3">Unknown Flooding</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-700/50">
+            {['Control', 'Audio Primary', 'Audio Secondary', 'Video', 'Lighting', 'Intercom'].map(
+              (name, i) => (
+                <tr key={name} className="hover:bg-gray-800/50">
+                  <td className="py-2 px-3 text-white">{name}</td>
+                  <td className="py-2 px-3 text-center">
+                    <input type="checkbox" defaultChecked={i !== 4} className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-gc-accent" />
+                  </td>
+                  <td className="py-2 px-3 text-center">
+                    <input type="checkbox" defaultChecked={i === 1 || i === 3} className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-gc-accent" />
+                  </td>
+                  <td className="py-2 px-3 text-center">
+                    <input type="checkbox" defaultChecked={i === 3} className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-gc-accent" />
+                  </td>
+                </tr>
+              )
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex items-center gap-3 pt-4 border-t border-gray-700">
+        <button
+          onClick={() =>
+            showPreview(
+              selectedSwitches.map((sw) => ({
+                switchName: sw.name,
+                switchIp: sw.ip,
+                changes: [
+                  { field: 'IGMP Snooping (Audio Primary)', currentValue: 'Disabled', newValue: 'Enabled', type: 'change' as const },
+                  { field: 'IGMP Querier (Video)', currentValue: 'Disabled', newValue: 'Enabled', type: 'add' as const },
+                ],
+              })),
+              'IGMP Configuration'
+            )
+          }
+          className="px-4 py-2 text-sm font-medium bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+        >
+          Preview Changes
+        </button>
+        <button
+          onClick={simulateExecution}
+          disabled={!previewReviewed}
+          className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+            previewReviewed ? 'bg-gc-accent text-white hover:bg-gc-accent/80' : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+          }`}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderPoETab = () => (
+    <div className="space-y-4">
+      <h4 className="text-sm font-medium text-white">PoE Configuration</h4>
+      <p className="text-xs text-gray-400">Enable/disable PoE and set priority for port ranges</p>
+      <div className="grid grid-cols-3 gap-4">
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Port Range</label>
+          <input
+            type="text"
+            defaultValue="1-8"
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">PoE</label>
+          <select className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent">
+            <option>Enabled</option>
+            <option>Disabled</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Priority</label>
+          <select className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent">
+            <option>Critical</option>
+            <option>High</option>
+            <option>Low</option>
+          </select>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 pt-4 border-t border-gray-700">
+        <button
+          onClick={() =>
+            showPreview(
+              selectedSwitches.map((sw) => ({
+                switchName: sw.name,
+                switchIp: sw.ip,
+                changes: [
+                  { field: 'Ports 1-8 PoE', currentValue: 'Disabled', newValue: 'Enabled (Critical)', type: 'change' as const },
+                ],
+              })),
+              'PoE Configuration'
+            )
+          }
+          className="px-4 py-2 text-sm font-medium bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+        >
+          Preview Changes
+        </button>
+        <button
+          onClick={simulateExecution}
+          disabled={!previewReviewed}
+          className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+            previewReviewed ? 'bg-gc-accent text-white hover:bg-gc-accent/80' : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+          }`}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderNamingTab = () => (
+    <SequentialNaming
+      switches={selectedSwitches}
+      onPreview={(assignments) => showPreview(buildNamingPreview(assignments), 'Sequential Naming')}
+      onApply={() => simulateExecution()}
+      previewReviewed={previewReviewed}
+    />
+  );
+
+  const renderIPTab = () => (
+    <SequentialIP
+      switches={selectedSwitches}
+      onPreview={(assignments) => showPreview(buildIPPreview(assignments), 'IP Addressing')}
+      onApply={() => simulateExecution()}
+      previewReviewed={previewReviewed}
+    />
+  );
+
+  const renderProfileTab = () => (
+    <div className="space-y-4">
+      <h4 className="text-sm font-medium text-white">Profile Deploy</h4>
+      <p className="text-xs text-gray-400">Select a saved profile and push to all selected switches</p>
+      <div>
+        <label className="block text-xs text-gray-400 mb-1">Select Profile</label>
+        <select className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent">
+          <option>Solotech Standard Audio</option>
+          <option>Solotech Video Production</option>
+          <option>Festival Main Stage</option>
+          <option>Corporate AV Default</option>
+        </select>
+      </div>
+      <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+        <h5 className="text-xs font-medium text-gray-300 mb-2">Profile Summary</h5>
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div>
+            <span className="text-gray-500">Groups:</span>
+            <span className="text-white ml-2">6 configured</span>
+          </div>
+          <div>
+            <span className="text-gray-500">VLANs:</span>
+            <span className="text-white ml-2">6 (1, 10, 11, 20, 30, 40)</span>
+          </div>
+          <div>
+            <span className="text-gray-500">IGMP:</span>
+            <span className="text-white ml-2">Snooping enabled on 5 groups</span>
+          </div>
+          <div>
+            <span className="text-gray-500">PoE:</span>
+            <span className="text-white ml-2">Enabled ports 1-16</span>
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 pt-4 border-t border-gray-700">
+        <button
+          onClick={() =>
+            showPreview(
+              selectedSwitches.map((sw) => ({
+                switchName: sw.name,
+                switchIp: sw.ip,
+                changes: [
+                  { field: 'Profile', currentValue: '(custom)', newValue: 'Solotech Standard Audio', type: 'change' as const },
+                  { field: 'Groups', currentValue: 'varies', newValue: '6 groups configured', type: 'change' as const },
+                ],
+              })),
+              'Profile Deploy'
+            )
+          }
+          className="px-4 py-2 text-sm font-medium bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+        >
+          Preview Changes
+        </button>
+        <button
+          onClick={simulateExecution}
+          disabled={!previewReviewed}
+          className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+            previewReviewed ? 'bg-gc-accent text-white hover:bg-gc-accent/80' : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+          }`}
+        >
+          Deploy Profile
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderFirmwareTab = () => (
+    <FirmwareUploader
+      switches={selectedSwitches}
+      onPreview={(file) => showPreview(buildFirmwarePreview(file, selectedSwitches), 'Firmware Update')}
+      onApply={() => simulateExecution()}
+      previewReviewed={previewReviewed}
+    />
+  );
+
+  const renderSystemTab = () => (
+    <div className="space-y-6">
+      <div>
+        <h4 className="text-sm font-medium text-white">System Operations</h4>
+        <p className="text-xs text-gray-400 mt-0.5">
+          Reboot or factory reset selected switches
+        </p>
+      </div>
+
+      {/* Reboot */}
+      <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-yellow-500/10 rounded-lg">
+              <Power className="w-5 h-5 text-yellow-400" />
+            </div>
+            <div>
+              <h5 className="text-sm font-medium text-white">Reboot All Selected</h5>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Sequentially reboot {selectedSwitches.length} switches
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() =>
+              showPreview(
+                selectedSwitches.map((sw) => ({
+                  switchName: sw.name,
+                  switchIp: sw.ip,
+                  changes: [
+                    { field: 'Action', currentValue: 'Running', newValue: 'Reboot', type: 'change' as const },
+                  ],
+                })),
+                'System Reboot'
+              )
+            }
+            className="px-4 py-2 text-sm font-medium bg-yellow-600/20 text-yellow-400 border border-yellow-500/30 rounded-lg hover:bg-yellow-600/30 transition-colors"
+          >
+            Reboot Selected
+          </button>
+        </div>
+      </div>
+
+      {/* Factory Reset */}
+      <div className="bg-gray-800 border border-red-500/20 rounded-lg p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-red-500/10 rounded-lg">
+              <RotateCcw className="w-5 h-5 text-red-400" />
+            </div>
+            <div>
+              <h5 className="text-sm font-medium text-white">Factory Reset</h5>
+              <p className="text-xs text-red-400/80 mt-0.5">
+                This will erase ALL configuration on selected switches
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() =>
+              showPreview(
+                selectedSwitches.map((sw) => ({
+                  switchName: sw.name,
+                  switchIp: sw.ip,
+                  changes: [
+                    { field: 'ALL Settings', currentValue: 'Current Config', newValue: 'Factory Default', type: 'remove' as const },
+                    { field: 'Groups/VLANs', currentValue: 'Configured', newValue: 'Removed', type: 'remove' as const },
+                    { field: 'Port Config', currentValue: 'Configured', newValue: 'Default', type: 'remove' as const },
+                  ],
+                })),
+                'Factory Reset',
+                true
+              )
+            }
+            className="px-4 py-2 text-sm font-medium bg-red-600/20 text-red-400 border border-red-500/30 rounded-lg hover:bg-red-600/30 transition-colors"
+          >
+            Factory Reset
+          </button>
+        </div>
+        <div className="mt-3 flex items-center gap-2 px-3 py-2 bg-red-500/5 border border-red-500/10 rounded">
+          <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+          <p className="text-xs text-red-400/80">
+            WARNING: Factory reset is irreversible. All VLAN, group, port, IGMP, and PoE
+            configurations will be permanently erased.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+
+  const tabRenderers: Record<TabId, () => React.ReactNode> = {
+    groups: renderGroupsTab,
+    ports: renderPortsTab,
+    igmp: renderIGMPTab,
+    poe: renderPoETab,
+    naming: renderNamingTab,
+    ip: renderIPTab,
+    profile: renderProfileTab,
+    firmware: renderFirmwareTab,
+    system: renderSystemTab,
+  };
+
+  // ─── Render ───────────────────────────────────────────────────────────
+
+  return (
+    <div className="flex flex-col h-full -m-6">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-700">
         <Layers size={24} className="text-gc-accent" />
-        <h2 className="text-xl font-semibold">Batch Configuration</h2>
+        <div>
+          <h2 className="text-xl font-semibold text-white">Batch Configuration</h2>
+          <p className="text-xs text-gray-400">
+            Apply configuration to multiple GigaCore switches simultaneously
+          </p>
+        </div>
       </div>
-      <p className="text-gray-400">
-        Apply configuration profiles to multiple GigaCore switches simultaneously.
-      </p>
-      <div className="bg-gc-panel rounded-lg border border-gray-700 p-8 text-center text-gray-500">
-        Batch Config View - Multi-switch configuration interface will be implemented here.
+
+      <div className="flex flex-1 min-h-0">
+        {/* ─── Left Sidebar: Switch Selector ─────────────────────────────── */}
+        <div className="w-[300px] flex-shrink-0 border-r border-gray-700 p-4 flex flex-col">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-gray-300">Switches</h3>
+            <select
+              value={groupBy}
+              onChange={(e) => setGroupBy(e.target.value as 'model' | 'rack' | 'none')}
+              className="text-xs bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-400 focus:outline-none focus:border-gc-accent"
+            >
+              <option value="none">No Grouping</option>
+              <option value="rack">By Rack</option>
+              <option value="model">By Model</option>
+            </select>
+          </div>
+
+          <BatchSelector
+            switches={MOCK_SWITCHES}
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
+            groupBy={groupBy}
+          />
+        </div>
+
+        {/* ─── Main Content Area ─────────────────────────────────────────── */}
+        <div className="flex-1 min-w-0 flex flex-col">
+          {selectedIds.size === 0 ? (
+            /* Empty state */
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center max-w-md">
+                <Layers className="w-16 h-16 text-gray-700 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-400 mb-2">
+                  Select Switches to Configure
+                </h3>
+                <p className="text-sm text-gray-500">
+                  Choose one or more switches from the left panel to begin batch configuration.
+                  Use filters and group selection for quick multi-select.
+                </p>
+              </div>
+            </div>
+          ) : showingProgress ? (
+            /* Progress view */
+            <div className="flex-1 overflow-y-auto p-6">
+              <BatchProgress
+                switches={batchStatuses}
+                overallProgress={overallProgress}
+                isRunning={isExecuting}
+                onAbort={handleAbort}
+                onRollback={handleRollback}
+                log={executionLog}
+              />
+              {!isExecuting && (
+                <div className="mt-4 flex justify-end">
+                  <button
+                    onClick={resetExecution}
+                    className="px-4 py-2 text-sm font-medium bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                  >
+                    Back to Configuration
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Operation tabs */
+            <>
+              {/* Tab bar */}
+              <div className="flex items-center gap-0.5 px-4 pt-3 border-b border-gray-700 overflow-x-auto flex-shrink-0">
+                {TABS.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      setActiveTab(tab.id);
+                      setPreviewReviewed(false);
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium rounded-t-lg border-b-2 transition-colors whitespace-nowrap ${
+                      activeTab === tab.id
+                        ? 'text-gc-accent border-gc-accent bg-gray-800/50'
+                        : 'text-gray-400 border-transparent hover:text-white hover:bg-gray-800/30'
+                    }`}
+                  >
+                    {tab.icon}
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab content */}
+              <div className="flex-1 overflow-y-auto p-6">
+                {selectedSwitches.length > 0 && (
+                  <div className="mb-4 flex items-center gap-2 text-xs text-gray-500">
+                    <span className="px-2 py-0.5 bg-gc-accent/10 text-gc-accent rounded-full font-medium">
+                      {selectedSwitches.length} switch{selectedSwitches.length > 1 ? 'es' : ''}
+                    </span>
+                    <span>selected:</span>
+                    <span className="text-gray-400">
+                      {selectedSwitches
+                        .slice(0, 4)
+                        .map((s) => s.name)
+                        .join(', ')}
+                      {selectedSwitches.length > 4 && ` +${selectedSwitches.length - 4} more`}
+                    </span>
+                  </div>
+                )}
+                {tabRenderers[activeTab]()}
+              </div>
+            </>
+          )}
+        </div>
       </div>
+
+      {/* Preview Modal */}
+      {previewData && (
+        <BatchPreview
+          operations={previewData}
+          onConfirm={confirmPreview}
+          onCancel={cancelPreview}
+          isDestructive={isDestructive}
+          operationLabel={previewLabel}
+        />
+      )}
     </div>
   );
 }
