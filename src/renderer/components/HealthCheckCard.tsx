@@ -1,182 +1,197 @@
-import React, { useState } from 'react';
+// =============================================================================
+// GigaCore Command — Health Check Card Component
+// =============================================================================
+
+import React from 'react';
 import {
   CheckCircle,
   AlertTriangle,
   XCircle,
-  Zap,
-  Minus,
-  Loader2,
+  AlertOctagon,
   ChevronDown,
   ChevronUp,
-  Play,
+  RefreshCw,
 } from 'lucide-react';
+import type { HealthCheckResult, HealthStatus } from '../../main/troubleshoot/health-checks';
 
-export type CheckStatus = 'pass' | 'warning' | 'fail' | 'critical' | 'not_run' | 'running';
-
-export interface CheckDetail {
-  switchName: string;
-  status: string;
-  message: string;
-  value?: string;
-}
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
 
 export interface HealthCheckCardProps {
-  name: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
-  status: CheckStatus;
-  summary: string;
-  details?: CheckDetail[];
-  lastRun?: string;
-  onRun: () => void;
+  result: HealthCheckResult;
+  isExpanded: boolean;
+  onToggle: () => void;
+  onRerun: () => void;
 }
 
-const statusConfig: Record<
-  CheckStatus,
-  { border: string; badge: string; badgeBg: string; label: string; Icon: React.ComponentType<{ size?: number; className?: string }> }
+// ---------------------------------------------------------------------------
+// Status helpers
+// ---------------------------------------------------------------------------
+
+const STATUS_CONFIG: Record<
+  HealthStatus,
+  {
+    icon: React.FC<{ className?: string }>;
+    borderColor: string;
+    bgColor: string;
+    textColor: string;
+    label: string;
+  }
 > = {
   pass: {
-    border: 'border-l-green-500',
-    badge: 'text-green-400',
-    badgeBg: 'bg-green-500/10',
+    icon: CheckCircle,
+    borderColor: 'border-l-emerald-500',
+    bgColor: 'bg-emerald-500/10',
+    textColor: 'text-emerald-400',
     label: 'Pass',
-    Icon: CheckCircle,
   },
   warning: {
-    border: 'border-l-yellow-500',
-    badge: 'text-yellow-400',
-    badgeBg: 'bg-yellow-500/10',
+    icon: AlertTriangle,
+    borderColor: 'border-l-yellow-500',
+    bgColor: 'bg-yellow-500/10',
+    textColor: 'text-yellow-400',
     label: 'Warning',
-    Icon: AlertTriangle,
   },
   fail: {
-    border: 'border-l-red-500',
-    badge: 'text-red-400',
-    badgeBg: 'bg-red-500/10',
+    icon: XCircle,
+    borderColor: 'border-l-orange-500',
+    bgColor: 'bg-orange-500/10',
+    textColor: 'text-orange-400',
     label: 'Fail',
-    Icon: XCircle,
   },
   critical: {
-    border: 'border-l-red-600',
-    badge: 'text-red-500',
-    badgeBg: 'bg-red-600/10',
+    icon: AlertOctagon,
+    borderColor: 'border-l-red-500',
+    bgColor: 'bg-red-500/10',
+    textColor: 'text-red-400',
     label: 'Critical',
-    Icon: Zap,
-  },
-  not_run: {
-    border: 'border-l-gray-500',
-    badge: 'text-gray-400',
-    badgeBg: 'bg-gray-500/10',
-    label: 'Not Run',
-    Icon: Minus,
-  },
-  running: {
-    border: 'border-l-blue-500',
-    badge: 'text-blue-400',
-    badgeBg: 'bg-blue-500/10',
-    label: 'Running',
-    Icon: Loader2,
   },
 };
 
-const detailStatusColor = (status: string) => {
-  switch (status) {
-    case 'pass': return 'text-green-400';
-    case 'warning': return 'text-yellow-400';
-    case 'fail': return 'text-red-400';
-    case 'critical': return 'text-red-500';
-    default: return 'text-gray-400';
+function statusBadge(status: HealthStatus): React.ReactNode {
+  const cfg = STATUS_CONFIG[status];
+  const Icon = cfg.icon;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${cfg.bgColor} ${cfg.textColor}`}
+    >
+      <Icon className="h-3 w-3" />
+      {cfg.label}
+    </span>
+  );
+}
+
+function formatTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch {
+    return iso;
   }
-};
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 export const HealthCheckCard: React.FC<HealthCheckCardProps> = ({
-  name,
-  icon: CardIcon,
-  status,
-  summary,
-  details,
-  lastRun,
-  onRun,
+  result,
+  isExpanded,
+  onToggle,
+  onRerun,
 }) => {
-  const [expanded, setExpanded] = useState(false);
-  const config = statusConfig[status];
-  const StatusIcon = config.Icon;
+  const cfg = STATUS_CONFIG[result.status];
+  const Icon = cfg.icon;
+  const isCritical = result.status === 'critical';
 
   return (
     <div
-      className={`bg-gray-800 rounded-lg border-l-4 ${config.border} border border-gray-700 overflow-hidden`}
+      className={`
+        relative overflow-hidden rounded-lg border-l-4 bg-gray-800/80 backdrop-blur
+        ${cfg.borderColor}
+        ${isCritical ? 'animate-critical-pulse shadow-lg shadow-red-500/20' : 'shadow-md'}
+        transition-all duration-200 hover:bg-gray-800
+      `}
     >
-      <div className="p-4">
-        {/* Header */}
-        <div className="flex items-start justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <CardIcon size={18} className="text-gc-accent" />
-            <h4 className="text-sm font-semibold text-gray-100">{name}</h4>
-          </div>
-          <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${config.badgeBg} ${config.badge}`}>
-            {status === 'running' ? (
-              <Loader2 size={12} className="animate-spin" />
-            ) : (
-              <StatusIcon size={12} />
-            )}
-            {config.label}
+      {/* Card header */}
+      <button
+        onClick={onToggle}
+        className="flex w-full items-center justify-between p-4 text-left"
+      >
+        <div className="flex items-center gap-3">
+          <Icon
+            className={`h-5 w-5 flex-shrink-0 ${cfg.textColor} ${
+              isCritical ? 'animate-pulse' : ''
+            }`}
+          />
+          <div>
+            <h3 className="text-sm font-bold text-gray-100">{result.displayName}</h3>
+            <p className="mt-0.5 text-xs text-gray-400">{result.message}</p>
           </div>
         </div>
 
-        {/* Summary */}
-        <p className="text-xs text-gray-400 mb-3 line-clamp-2">{summary}</p>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            {details && details.length > 0 && (
-              <button
-                onClick={() => setExpanded(!expanded)}
-                className="flex items-center gap-1 text-xs text-gc-accent hover:text-gc-accent/80 transition-colors"
-              >
-                {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                Details ({details.length})
-              </button>
-            )}
-            {lastRun && (
-              <span className="text-xs text-gray-500">{lastRun}</span>
-            )}
-          </div>
-          <button
-            onClick={onRun}
-            disabled={status === 'running'}
-            className="flex items-center gap-1 px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed rounded text-gray-300 transition-colors"
-          >
-            {status === 'running' ? (
-              <Loader2 size={12} className="animate-spin" />
-            ) : (
-              <Play size={12} />
-            )}
-            Run
-          </button>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-gray-500">{formatTime(result.runAt)}</span>
+          {isExpanded ? (
+            <ChevronUp className="h-4 w-4 text-gray-500" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-gray-500" />
+          )}
         </div>
-      </div>
+      </button>
 
-      {/* Expanded details */}
-      {expanded && details && details.length > 0 && (
-        <div className="border-t border-gray-700 bg-gray-850 px-4 py-3">
+      {/* Re-run button */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onRerun();
+        }}
+        className="absolute right-10 top-4 rounded p-1 text-gray-500 hover:bg-gray-700 hover:text-gray-300"
+        title="Re-run this check"
+      >
+        <RefreshCw className="h-3.5 w-3.5" />
+      </button>
+
+      {/* Expanded detail table */}
+      {isExpanded && result.details.length > 0 && (
+        <div className="border-t border-gray-700/50 px-4 pb-4 pt-2">
           <table className="w-full text-xs">
             <thead>
               <tr className="text-gray-500">
-                <th className="text-left pb-1 font-medium">Switch</th>
-                <th className="text-left pb-1 font-medium">Status</th>
-                <th className="text-left pb-1 font-medium">Message</th>
-                <th className="text-right pb-1 font-medium">Value</th>
+                <th className="pb-1 text-left font-medium">Switch / Item</th>
+                <th className="pb-1 text-left font-medium">Value</th>
+                <th className="pb-1 text-left font-medium">Threshold</th>
+                <th className="pb-1 text-left font-medium">Status</th>
               </tr>
             </thead>
-            <tbody>
-              {details.map((d, i) => (
-                <tr key={i} className="border-t border-gray-700/50">
-                  <td className="py-1 text-gray-300">{d.switchName}</td>
-                  <td className={`py-1 capitalize ${detailStatusColor(d.status)}`}>{d.status}</td>
-                  <td className="py-1 text-gray-400">{d.message}</td>
-                  <td className="py-1 text-right text-gray-300">{d.value ?? '-'}</td>
-                </tr>
-              ))}
+            <tbody className="divide-y divide-gray-700/30">
+              {result.details.map((detail, idx) => {
+                const detailCfg = STATUS_CONFIG[detail.status];
+                return (
+                  <tr key={idx} className="text-gray-300">
+                    <td className="py-1.5 pr-2">
+                      {detail.switchName && (
+                        <span className="font-medium text-gray-200">{detail.switchName}</span>
+                      )}
+                      {detail.switchIp && (
+                        <span className="ml-1 text-gray-500">({detail.switchIp})</span>
+                      )}
+                      {detail.port != null && (
+                        <span className="ml-1 text-gray-500">port {detail.port}</span>
+                      )}
+                      {!detail.switchName && !detail.switchIp && (
+                        <span className="text-gray-400">{detail.message}</span>
+                      )}
+                    </td>
+                    <td className="py-1.5 pr-2 font-mono text-gray-200">
+                      {detail.value ?? '-'}
+                    </td>
+                    <td className="py-1.5 pr-2 text-gray-500">{detail.threshold ?? '-'}</td>
+                    <td className="py-1.5">{statusBadge(detail.status)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
