@@ -220,9 +220,23 @@ export class SubnetScanner {
       return prefix === 32 ? [network] : [network, this.incrementIp(network)];
     }
 
-    const subnet = ipModule.subnet(network, ipModule.fromPrefixLen(prefix));
+    // Convert prefix length to netmask manually
+    const maskLong = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
+    const netmask = [
+      (maskLong >>> 24) & 255,
+      (maskLong >>> 16) & 255,
+      (maskLong >>> 8) & 255,
+      maskLong & 255,
+    ].join('.');
+    const subnet = ipModule.subnet(network, netmask);
     const firstLong = ipModule.toLong(subnet.firstAddress);
     const lastLong = ipModule.toLong(subnet.lastAddress);
+
+    const hostCount = lastLong - firstLong + 1;
+    if (hostCount > 4094) {
+      console.warn(`Subnet ${cidr} too large (${hostCount} hosts), limiting to /20`);
+      return []; // reject subnets larger than /20
+    }
 
     const ips: string[] = [];
     for (let long = firstLong; long <= lastLong; long++) {

@@ -1,6 +1,8 @@
 // =============================================================================
-// GigaCore Command — Troubleshooting: Ping Tool
+// Luminex Configurator — Troubleshooting: Ping Tool
 // =============================================================================
+
+import { exec } from 'child_process';
 
 export interface PingResult {
   host: string;
@@ -35,58 +37,89 @@ function now(): string {
 }
 
 /**
- * Perform a single ICMP-like ping.
- * In a real Electron app this would use raw sockets or `child_process` to
- * invoke the system `ping` command. Here we simulate realistic behaviour.
+ * Perform a single ICMP ping using the system `ping` command via child_process.
  */
 async function icmpPing(
   host: string,
-  timeoutMs: number,
+  timeoutMs: number = 5000,
 ): Promise<PingResult> {
-  const start = performance.now();
-
   return new Promise<PingResult>((resolve) => {
-    // Simulate network round-trip with realistic jitter
-    const baseLatency = 2 + Math.random() * 8; // 2-10ms base
-    const jitter = (Math.random() - 0.5) * 4;  // +/-2ms jitter
-    const latency = Math.max(0.5, baseLatency + jitter);
-
-    // ~3% chance of timeout
-    const willTimeout = Math.random() < 0.03;
-    // ~1% chance of host unreachable
-    const willFail = Math.random() < 0.01;
-
-    if (willTimeout) {
-      setTimeout(() => {
-        resolve({
-          host,
-          alive: false,
-          latencyMs: -1,
-          timestamp: now(),
-          error: `Request timed out after ${timeoutMs}ms`,
-        });
-      }, Math.min(timeoutMs, 100)); // cap simulated wait
-    } else if (willFail) {
-      setTimeout(() => {
-        resolve({
-          host,
-          alive: false,
-          latencyMs: -1,
-          timestamp: now(),
-          error: 'Destination host unreachable',
-        });
-      }, 10);
-    } else {
-      setTimeout(() => {
-        resolve({
-          host,
-          alive: true,
-          latencyMs: Math.round(latency * 100) / 100,
-          timestamp: now(),
-          ttl: 64 - Math.floor(Math.random() * 3),
-        });
-      }, Math.min(latency, 50));
+    // Validate host — prevent command injection
+    if (!/^[\w.\-:]+$/.test(host)) {
+      resolve({
+        host,
+        alive: false,
+        latencyMs: -1,
+        timestamp: now(),
+        error: 'Invalid host format',
+      });
+      return;
     }
+
+    const isWindows = process.platform === 'win32';
+    const timeoutSec = Math.max(1, Math.ceil(timeoutMs / 1000));
+
+    // Build platform-specific ping command
+    const cmd = isWindows
+      ? `ping -n 1 -w ${timeoutMs} ${host}`
+      : `ping -c 1 -W ${timeoutSec} ${host}`;
+
+    const startTime = performance.now();
+
+    exec(cmd, { timeout: timeoutMs + 2000 }, (error, stdout) => {
+      const elapsed = performance.now() - startTime;
+
+      if (error) {
+        resolve({
+          host,
+          alive: false,
+          latencyMs: -1,
+          timestamp: now(),
+          error: `Ping failed: ${error.message}`,
+        });
+        return;
+      }
+
+      // Parse latency from output
+      let latencyMs = -1;
+      let ttl: number | undefined;
+
+      if (isWindows) {
+        // Windows: "Reply from x.x.x.x: bytes=32 time=2ms TTL=64"
+        // or "time<1ms" for very fast responses
+        const timeMatch = stdout.match(/time[=<](\d+(?:\.\d+)?)\s*ms/i);
+        if (timeMatch) {
+          latencyMs = parseFloat(timeMatch[1]);
+        }
+        const ttlMatch = stdout.match(/TTL[=](\d+)/i);
+        if (ttlMatch) {
+          ttl = parseInt(ttlMatch[1], 10);
+        }
+      } else {
+        // macOS/Linux: "64 bytes from x.x.x.x: icmp_seq=1 ttl=64 time=1.23 ms"
+        const timeMatch = stdout.match(/time[=](\d+(?:\.\d+)?)\s*ms/i);
+        if (timeMatch) {
+          latencyMs = parseFloat(timeMatch[1]);
+        }
+        const ttlMatch = stdout.match(/ttl[=](\d+)/i);
+        if (ttlMatch) {
+          ttl = parseInt(ttlMatch[1], 10);
+        }
+      }
+
+      // If we got output but couldn't parse latency, use elapsed time
+      if (latencyMs === -1 && !error) {
+        latencyMs = Math.round(elapsed * 100) / 100;
+      }
+
+      resolve({
+        host,
+        alive: latencyMs >= 0,
+        latencyMs,
+        timestamp: now(),
+        ttl,
+      });
+    });
   });
 }
 

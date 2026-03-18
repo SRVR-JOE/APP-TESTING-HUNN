@@ -1,6 +1,9 @@
 // ── Excel Import/Export Engine — Type Definitions ────────────────────────────
 // All TypeScript interfaces for the GigaCore Excel system.
 
+// Re-export core types from the single source of truth
+export type { DiscoveredSwitch, SwitchGroup, SwitchPort } from '../../shared/types';
+
 export interface ExcelIPScheme {
   switches: ExcelSwitchEntry[];
   portAssignments: ExcelPortAssignment[];
@@ -131,17 +134,8 @@ export interface SwitchVerification {
   mismatches: string[];
 }
 
-/** Represents a switch discovered on the network. */
-export interface DiscoveredSwitch {
-  name: string;
-  ip: string;
-  model: string;
-  mac: string;
-  groups?: DiscoveredGroup[];
-  ports?: DiscoveredPort[];
-}
-
-export interface DiscoveredGroup {
+/** Excel-specific group snapshot (used during deploy comparison). */
+export interface ExcelDiscoveredGroup {
   groupNumber: number;
   name: string;
   vlanId: number;
@@ -150,7 +144,8 @@ export interface DiscoveredGroup {
   unknownFlooding: boolean;
 }
 
-export interface DiscoveredPort {
+/** Excel-specific port snapshot (used during deploy comparison). */
+export interface ExcelDiscoveredPort {
   port: number;
   label: string;
   groupVlan: string;

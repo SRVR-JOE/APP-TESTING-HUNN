@@ -1,5 +1,5 @@
 // =============================================================================
-// GigaCore Command — Side-by-Side Switch Comparison View
+// Luminex Configurator — Side-by-Side Switch Comparison View
 // =============================================================================
 
 import React, { useState } from 'react';

@@ -15,7 +15,7 @@ import {
   Eye,
   EyeOff,
   Tag,
-  TagOff,
+  Tags,
   Image,
   FileCode,
   ZoomIn,
@@ -252,7 +252,7 @@ function TopologyFlowInner() {
           active={showLabels}
           title={showLabels ? 'Hide Labels' : 'Show Labels'}
         >
-          {showLabels ? <Tag size={14} /> : <TagOff size={14} />}
+          {showLabels ? <Tag size={14} /> : <Tags size={14} />}
           <span className="hidden sm:inline">Labels</span>
         </ToolbarButton>
 

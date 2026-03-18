@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e3a5f"/>
+      <stop offset="100%" style="stop-color:#0d2137"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00a8e8"/>
+      <stop offset="100%" style="stop-color:#0077b6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect x="8" y="8" width="240" height="240" rx="48" ry="48" fill="url(#bg)"/>
+
+  <!-- Connection lines -->
+  <line x1="128" y1="88" x2="72" y2="168" stroke="#00a8e8" stroke-width="3" opacity="0.5"/>
+  <line x1="128" y1="88" x2="184" y2="168" stroke="#00a8e8" stroke-width="3" opacity="0.5"/>
+  <line x1="72" y1="168" x2="184" y2="168" stroke="#00a8e8" stroke-width="3" opacity="0.5"/>
+  <line x1="128" y1="88" x2="128" y2="168" stroke="#00a8e8" stroke-width="3" opacity="0.5"/>
+
+  <!-- Central switch body -->
+  <rect x="88" y="108" width="80" height="40" rx="6" ry="6" fill="url(#glow)" opacity="0.9"/>
+
+  <!-- Switch port indicators -->
+  <rect x="98" y="116" width="8" height="6" rx="1" fill="#ffffff" opacity="0.9"/>
+  <rect x="112" y="116" width="8" height="6" rx="1" fill="#ffffff" opacity="0.9"/>
+  <rect x="126" y="116" width="8" height="6" rx="1" fill="#ffffff" opacity="0.9"/>
+  <rect x="140" y="116" width="8" height="6" rx="1" fill="#ffffff" opacity="0.9"/>
+  <rect x="154" y="116" width="8" height="6" rx="1" fill="#ffffff" opacity="0.9"/>
+
+  <!-- Status LEDs on switch -->
+  <circle cx="101" cy="136" r="3" fill="#00ff88"/>
+  <circle cx="115" cy="136" r="3" fill="#00ff88"/>
+  <circle cx="129" cy="136" r="3" fill="#00ff88"/>
+  <circle cx="143" cy="136" r="3" fill="#ffaa00"/>
+  <circle cx="157" cy="136" r="3" fill="#00ff88"/>
+
+  <!-- Top node -->
+  <circle cx="128" cy="72" r="16" fill="url(#glow)" opacity="0.85"/>
+  <circle cx="128" cy="72" r="8" fill="#ffffff" opacity="0.3"/>
+
+  <!-- Bottom-left node -->
+  <circle cx="64" cy="184" r="14" fill="url(#glow)" opacity="0.7"/>
+  <circle cx="64" cy="184" r="7" fill="#ffffff" opacity="0.3"/>
+
+  <!-- Bottom-right node -->
+  <circle cx="192" cy="184" r="14" fill="url(#glow)" opacity="0.7"/>
+  <circle cx="192" cy="184" r="7" fill="#ffffff" opacity="0.3"/>
+
+  <!-- Subtle ring accent around the switch -->
+  <rect x="82" y="102" width="92" height="52" rx="10" ry="10" fill="none" stroke="#00a8e8" stroke-width="1.5" opacity="0.4"/>
+</svg>

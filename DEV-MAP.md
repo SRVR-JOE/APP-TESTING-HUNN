@@ -6,7 +6,7 @@
 
 ## 1. PROJECT OVERVIEW
 
-**App Name:** GigaCore Command
+**App Name:** Luminex Configurator
 **Purpose:** Network scanner that discovers all Luminex GigaCore switches on the local network, displays them in a visual topology, and provides batch programming of Groups (VLANs), port settings, IGMP, PoE, trunks, profiles, and firmware — all from a single GUI. Supports Excel-driven IP schemes and profile deployment, custom rack/location maps with device grouping, comprehensive data logging, and built-in troubleshooting tools.
 
 **Target Platform:** Electron + React desktop app (Windows primary, macOS secondary)
@@ -99,7 +99,7 @@ This is key for batch programming — create a "gold" profile, then deploy to al
 
 Araneo is Luminex's official tool. Understanding its capabilities tells us where our app adds value:
 
-| Feature | Araneo | Our App (GigaCore Command) |
+| Feature | Araneo | Our App (Luminex Configurator) |
 |---------|--------|----------------------------|
 | Discovery | Yes (mDNS + proprietary) | Yes (mDNS + subnet scan + LLDP) |
 | Topology view | Yes | Yes (simplified, AV-focused) |
@@ -883,7 +883,7 @@ CREATE TABLE health_checks (
 
 ```bash
 # 1. Scaffold the Electron project
-mkdir gigacore-command && cd gigacore-command
+mkdir luminex-configurator && cd luminex-configurator
 npm create vite@latest . -- --template react-ts
 
 # 2. Add Electron + all dependencies
@@ -917,7 +917,7 @@ npm install bonjour-service axios ws p-queue ip zustand reactflow lucide-react \
 
 **Start command for Claude Code:**
 
-> "Build the Electron + Vite + React scaffold for GigaCore Command following the architecture in the dev map. Set up the SQLite database with all tables from section 7. Implement the event logger that writes to SQLite. Then build the Discovery Engine — mDNS scanning using bonjour-service and subnet HTTP probing. Wire it to a ScannerView that shows discovered Luminex GigaCore switches as cards with model, IP, MAC, firmware version, and health status. All discovery events should be logged to SQLite."
+> "Build the Electron + Vite + React scaffold for Luminex Configurator following the architecture in the dev map. Set up the SQLite database with all tables from section 7. Implement the event logger that writes to SQLite. Then build the Discovery Engine — mDNS scanning using bonjour-service and subnet HTTP probing. Wire it to a ScannerView that shows discovered Luminex GigaCore switches as cards with model, IP, MAC, firmware version, and health status. All discovery events should be logged to SQLite."
 
 -----
 

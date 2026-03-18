@@ -1,8 +1,8 @@
 // =============================================================================
-// GigaCore Command — Troubleshooting: Quick Compare
+// Luminex Configurator — Troubleshooting: Quick Compare
 // =============================================================================
 
-import type { DiscoveredSwitch } from './health-checks';
+import type { HealthCheckSwitch as DiscoveredSwitch } from './health-checks';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -77,7 +77,7 @@ export class QuickCompare {
     const diffs: CompareDiff[] = [
       { field: 'Model', valueA: a.model, valueB: b.model, match: a.model === b.model },
       { field: 'Firmware', valueA: a.firmware, valueB: b.firmware, match: a.firmware === b.firmware },
-      { field: 'MAC Address', valueA: a.macAddress, valueB: b.macAddress, match: a.macAddress === b.macAddress },
+      { field: 'MAC Address', valueA: a.mac, valueB: b.mac, match: a.mac === b.mac },
       { field: 'IP Address', valueA: a.ip, valueB: b.ip, match: a.ip === b.ip },
       {
         field: 'Temperature',
@@ -102,15 +102,15 @@ export class QuickCompare {
 
   private compareGroups(a: DiscoveredSwitch, b: DiscoveredSwitch): CompareSection {
     const allVlanIds = new Set([
-      ...a.vlans.map((v) => v.id),
-      ...b.vlans.map((v) => v.id),
+      ...a.vlans.map((v: any) => v.id),
+      ...b.vlans.map((v: any) => v.id),
     ]);
 
     const diffs: CompareDiff[] = [];
 
     for (const vid of [...allVlanIds].sort((x, y) => x - y)) {
-      const vlanA = a.vlans.find((v) => v.id === vid);
-      const vlanB = b.vlans.find((v) => v.id === vid);
+      const vlanA = a.vlans.find((v: any) => v.id === vid);
+      const vlanB = b.vlans.find((v: any) => v.id === vid);
 
       diffs.push({
         field: `VLAN ${vid} — Name`,

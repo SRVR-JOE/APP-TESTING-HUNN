@@ -115,8 +115,8 @@ export default function PortStatsChart({
       rxBytes: s.rxBytes,
       txPackets: s.txPackets,
       rxPackets: s.rxPackets,
-      rxErrors: s.rxErrors,
-      txErrors: s.txErrors,
+      rxErrors: s.crcErrors,
+      txErrors: s.collisions,
       poeWatts: s.poeWatts ?? 0,
     }));
   }, [data]);

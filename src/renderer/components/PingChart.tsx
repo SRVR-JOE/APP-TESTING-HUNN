@@ -1,5 +1,5 @@
 // =============================================================================
-// GigaCore Command — Real-time Ping Latency Chart
+// Luminex Configurator — Real-time Ping Latency Chart
 // =============================================================================
 
 import React, { useMemo } from 'react';

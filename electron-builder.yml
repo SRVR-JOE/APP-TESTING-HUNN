@@ -1,27 +1,37 @@
-appId: com.gigacore.command
-productName: GigaCore Command
+appId: com.luminex.configurator
+productName: Luminex Configurator
 directories:
   output: out
   buildResources: resources
+icon: resources/icon
 files:
   - dist/**/*
   - package.json
 asar: true
+asarUnpack:
+  - "dist/main/main/preload.js"
+  - "node_modules/better-sqlite3/**"
+  - "node_modules/bindings/**"
+forceCodeSigning: false
 win:
   target:
     - nsis
   icon: resources/icon.ico
+  signAndEditExecutable: false
+  rfc3161TimeStampServer: null
 mac:
   target:
     - dmg
-  icon: resources/icon.icns
   category: public.app-category.utilities
+  icon: resources/icon.png
 linux:
   target:
     - AppImage
     - deb
-  icon: resources/icon.png
   category: Utility
+  icon: resources/icon.png
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  shortcutName: Luminex Configurator
+  uninstallDisplayName: Luminex Configurator

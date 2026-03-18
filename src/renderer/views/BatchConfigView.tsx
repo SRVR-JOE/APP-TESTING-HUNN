@@ -37,28 +37,28 @@ const MOCK_SWITCHES: DiscoveredSwitch[] = [
     firmware: '2.8.1', generation: 2, serial: 'GC30-20240101', isOnline: true,
     lastSeen: '2026-03-18T10:00:00Z', firstSeen: '2026-01-15T08:00:00Z',
     rackGroup: 'FOH Rack A', portCount: 30, portsUp: 24, healthStatus: 'healthy',
-    poeTotal: 370, poeBudget: 500,
+    poe: { drawW: 370, budgetW: 500 },
   },
   {
     id: 'sw-002', name: 'FOH-Main-02', model: 'GC-30i', ip: '10.0.1.11', mac: '00:50:C2:00:01:02',
     firmware: '2.8.1', generation: 2, serial: 'GC30-20240102', isOnline: true,
     lastSeen: '2026-03-18T10:00:00Z', firstSeen: '2026-01-15T08:00:00Z',
     rackGroup: 'FOH Rack A', portCount: 30, portsUp: 18, healthStatus: 'healthy',
-    poeTotal: 280, poeBudget: 500,
+    poe: { drawW: 280, budgetW: 500 },
   },
   {
     id: 'sw-003', name: 'Stage-Left-01', model: 'GC-16t', ip: '10.0.1.20', mac: '00:50:C2:00:02:01',
     firmware: '2.7.3', generation: 2, serial: 'GC16-20240201', isOnline: true,
     lastSeen: '2026-03-18T10:00:00Z', firstSeen: '2026-02-01T08:00:00Z',
     rackGroup: 'Stage Left', portCount: 16, portsUp: 12, healthStatus: 'healthy',
-    poeTotal: 120, poeBudget: 240,
+    poe: { drawW: 120, budgetW: 240 },
   },
   {
     id: 'sw-004', name: 'Stage-Right-01', model: 'GC-16t', ip: '10.0.1.21', mac: '00:50:C2:00:02:02',
     firmware: '2.7.3', generation: 2, serial: 'GC16-20240202', isOnline: true,
     lastSeen: '2026-03-18T10:00:00Z', firstSeen: '2026-02-01T08:00:00Z',
     rackGroup: 'Stage Right', portCount: 16, portsUp: 10, healthStatus: 'warning',
-    poeTotal: 190, poeBudget: 240,
+    poe: { drawW: 190, budgetW: 240 },
   },
   {
     id: 'sw-005', name: 'Monitor-01', model: 'GC-14R', ip: '10.0.1.30', mac: '00:50:C2:00:03:01',
@@ -83,7 +83,7 @@ const MOCK_SWITCHES: DiscoveredSwitch[] = [
     firmware: '2.8.0', generation: 2, serial: 'GC14-20240302', isOnline: true,
     lastSeen: '2026-03-18T10:00:00Z', firstSeen: '2026-02-15T08:00:00Z',
     rackGroup: 'Stage Left', portCount: 14, portsUp: 11, healthStatus: 'critical',
-    poeTotal: 50, poeBudget: 150,
+    poe: { drawW: 50, budgetW: 150 },
   },
 ];
 

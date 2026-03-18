@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { AlertTriangle, ArrowUpDown } from 'lucide-react';
 import type { DiscoveredSwitch } from '@shared/types';
 
@@ -58,14 +58,15 @@ export const SequentialIP: React.FC<SequentialIPProps> = ({
   const [order, setOrder] = useState<string[]>(switches.map((s) => s.id));
 
   // Keep order in sync
-  useMemo(() => {
+  const switchIdKey = switches.map((s) => s.id).join(',');
+  useEffect(() => {
     const currentIds = new Set(order);
     const newIds = switches.map((s) => s.id);
     const hasNew = newIds.some((id) => !currentIds.has(id));
     if (hasNew || order.length !== newIds.length) {
       setOrder(newIds);
     }
-  }, [switches.map((s) => s.id).join(',')]);
+  }, [switchIdKey]);
 
   const assignments = useMemo(() => {
     if (!isValidIP(baseIP)) return [];

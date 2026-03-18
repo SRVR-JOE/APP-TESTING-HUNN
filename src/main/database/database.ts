@@ -1,5 +1,5 @@
 // ============================================================================
-// GigaCore Command — Core Database Manager (better-sqlite3)
+// Luminex Configurator — Core Database Manager (better-sqlite3)
 // ============================================================================
 
 import Database from 'better-sqlite3';
@@ -18,7 +18,7 @@ export class DatabaseManager {
       fs.mkdirSync(userDataPath, { recursive: true });
     }
 
-    const dbPath = path.join(userDataPath, 'gigacore-command.db');
+    const dbPath = path.join(userDataPath, 'luminex-configurator.db');
     this.db = new Database(dbPath);
 
     // WAL mode for concurrent read performance
@@ -30,20 +30,34 @@ export class DatabaseManager {
   }
 
   // --------------------------------------------------------------------------
-  // Schema initialisation — idempotent (IF NOT EXISTS)
+  // Schema initialisation — versioned via SQLite user_version pragma
   // --------------------------------------------------------------------------
 
   private initialize(): void {
+    const currentVersion = this.db.pragma('user_version', { simple: true }) as number;
+
+    if (currentVersion < 1) {
+      // Run full schema creation
+      this.createSchema();
+      this.db.pragma('user_version = 1');
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Schema creation — idempotent (IF NOT EXISTS) with constraints & indexes
+  // --------------------------------------------------------------------------
+
+  private createSchema(): void {
     this.db.exec(`
       -- switches
       CREATE TABLE IF NOT EXISTS switches (
-        id TEXT PRIMARY KEY,
+        id TEXT PRIMARY KEY NOT NULL,
         name TEXT,
         model TEXT,
-        ip TEXT,
+        ip TEXT NOT NULL,
         subnet TEXT,
         gateway TEXT,
-        mac TEXT UNIQUE,
+        mac TEXT NOT NULL UNIQUE,
         firmware TEXT,
         generation INTEGER,
         serial TEXT,
@@ -54,6 +68,8 @@ export class DatabaseManager {
       );
 
       -- discovered_devices
+      -- NOTE: connected_switch_mac stores the switch ID (which is typically the
+      -- MAC address). The FK references switches(id), not switches(mac).
       CREATE TABLE IF NOT EXISTS discovered_devices (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         mac TEXT,
@@ -66,7 +82,7 @@ export class DatabaseManager {
         link_speed TEXT,
         first_seen DATETIME,
         last_seen DATETIME,
-        FOREIGN KEY (connected_switch_mac) REFERENCES switches(id)
+        FOREIGN KEY (connected_switch_mac) REFERENCES switches(id) ON DELETE CASCADE
       );
 
       -- event_log
@@ -74,12 +90,12 @@ export class DatabaseManager {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
         category TEXT,
-        severity TEXT,
+        severity TEXT NOT NULL,
         switch_mac TEXT,
         switch_name TEXT,
-        message TEXT,
+        message TEXT NOT NULL,
         details TEXT,
-        FOREIGN KEY (switch_mac) REFERENCES switches(id)
+        FOREIGN KEY (switch_mac) REFERENCES switches(id) ON DELETE CASCADE
       );
 
       -- port_stats (time-series)
@@ -101,7 +117,7 @@ export class DatabaseManager {
         drops INTEGER,
         link_speed TEXT,
         poe_watts REAL,
-        FOREIGN KEY (switch_mac) REFERENCES switches(id)
+        FOREIGN KEY (switch_mac) REFERENCES switches(id) ON DELETE CASCADE
       );
 
       -- rack_groups
@@ -114,7 +130,8 @@ export class DatabaseManager {
         height REAL,
         color TEXT,
         layout_id TEXT,
-        sort_order INTEGER
+        sort_order INTEGER,
+        FOREIGN KEY (layout_id) REFERENCES map_layouts(id) ON DELETE SET NULL
       );
 
       -- rack_switch_positions
@@ -122,8 +139,8 @@ export class DatabaseManager {
         switch_mac TEXT,
         rack_group_id TEXT,
         slot_index INTEGER,
-        FOREIGN KEY (switch_mac) REFERENCES switches(id),
-        FOREIGN KEY (rack_group_id) REFERENCES rack_groups(id),
+        FOREIGN KEY (switch_mac) REFERENCES switches(id) ON DELETE CASCADE,
+        FOREIGN KEY (rack_group_id) REFERENCES rack_groups(id) ON DELETE CASCADE,
         PRIMARY KEY (switch_mac, rack_group_id)
       );
 
@@ -144,7 +161,8 @@ export class DatabaseManager {
         description TEXT,
         created DATETIME,
         config_json TEXT,
-        layout_id TEXT
+        layout_id TEXT,
+        FOREIGN KEY (layout_id) REFERENCES map_layouts(id) ON DELETE SET NULL
       );
 
       -- health_checks
@@ -155,7 +173,8 @@ export class DatabaseManager {
         switch_mac TEXT,
         status TEXT,
         message TEXT,
-        details TEXT
+        details TEXT,
+        FOREIGN KEY (switch_mac) REFERENCES switches(id) ON DELETE CASCADE
       );
 
       -- ----------------------------------------------------------------
@@ -182,7 +201,60 @@ export class DatabaseManager {
 
       CREATE INDEX IF NOT EXISTS idx_health_checks_time
         ON health_checks(timestamp);
+
+      -- Composite unique index for device upsert (prevents duplicate device
+      -- entries for the same MAC on the same switch port)
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_identity
+        ON discovered_devices(mac, connected_switch_mac, connected_port);
+
+      -- FK lookup index for discovered_devices -> switches
+      CREATE INDEX IF NOT EXISTS idx_devices_switch
+        ON discovered_devices(connected_switch_mac);
+
+      -- Support time-range queries on device last_seen
+      CREATE INDEX IF NOT EXISTS idx_devices_last_seen
+        ON discovered_devices(last_seen);
+
+      -- FK lookup index for health_checks -> switches
+      CREATE INDEX IF NOT EXISTS idx_health_checks_switch
+        ON health_checks(switch_mac);
     `);
+  }
+
+  // --------------------------------------------------------------------------
+  // Maintenance — automatic purge of stale time-series data
+  // --------------------------------------------------------------------------
+
+  /** Start background maintenance jobs (call once after construction). */
+  startMaintenanceJobs(): void {
+    const SIX_HOURS = 6 * 60 * 60 * 1000;
+
+    // Purge old port stats every 6 hours (keep last 30 days)
+    setInterval(() => {
+      try {
+        const days = 30; // PORT_STATS_RETENTION_DAYS
+        this.db
+          .prepare(
+            `DELETE FROM port_stats WHERE timestamp < datetime('now', '-' || ? || ' days')`
+          )
+          .run(days);
+      } catch (e) {
+        console.error('Port stats purge failed:', e);
+      }
+    }, SIX_HOURS);
+
+    // Purge old event logs every 6 hours (keep last 50 000 rows)
+    setInterval(() => {
+      try {
+        this.db
+          .prepare(
+            `DELETE FROM event_log WHERE id NOT IN (SELECT id FROM event_log ORDER BY timestamp DESC LIMIT 50000)`
+          )
+          .run();
+      } catch (e) {
+        console.error('Event log purge failed:', e);
+      }
+    }, SIX_HOURS);
   }
 
   // --------------------------------------------------------------------------

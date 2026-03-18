@@ -20,8 +20,8 @@ export type {
   VerificationResult,
   SwitchVerification,
   DiscoveredSwitch,
-  DiscoveredGroup,
-  DiscoveredPort,
+  ExcelDiscoveredGroup,
+  ExcelDiscoveredPort,
   GigaCoreClient,
   GigaCoreModel,
 } from './types';

@@ -1,5 +1,5 @@
 // ============================================================================
-// GigaCore Command — Batch Operation Executor
+// Luminex Configurator — Batch Operation Executor
 // Queued batch operations with progress reporting, abort, and rollback.
 // Runs in the Electron main process.
 // ============================================================================

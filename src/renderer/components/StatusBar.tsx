@@ -32,7 +32,7 @@ export function StatusBar() {
         )}
       </div>
 
-      <div className="ml-auto text-gray-500">GigaCore Command</div>
+      <div className="ml-auto text-gray-500">Luminex Configurator</div>
     </footer>
   );
 }

@@ -8,8 +8,10 @@ import {
   Monitor,
   Loader2,
 } from 'lucide-react';
-import type { DiscoveredDevice } from '../types';
 import { useDiscoveredDevices, useElectronAPI } from '../hooks/useElectronAPI';
+
+/** Infer the device type from the hook return value. */
+type DiscoveredDevice = ReturnType<typeof useDiscoveredDevices>['devices'][number];
 
 // ---------------------------------------------------------------------------
 // Protocol styling
@@ -191,7 +193,7 @@ export const DiscoveredDevicesView: React.FC = () => {
   );
 
   const handleExport = useCallback(() => {
-    api.exportCSV(filteredDevices as unknown as unknown[], 'discovered_devices');
+    api.exportCSV();
   }, [api, filteredDevices]);
 
   const SortIcon: React.FC<{ col: SortKey }> = ({ col }) => {

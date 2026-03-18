@@ -1,5 +1,5 @@
 // ============================================================================
-// GigaCore Command — Event Logger
+// Luminex Configurator — Event Logger
 // ============================================================================
 
 import type Database from 'better-sqlite3';
@@ -69,7 +69,7 @@ export class EventLogger {
 
   /**
    * Query the event log with flexible filters.
-   * Returns matching entries plus the total count (for pagination).
+   * Returns matching entries (camelCase) plus the total count (for pagination).
    */
   query(filters: LogFilters): { entries: EventLogEntry[]; total: number } {
     const conditions: string[] = [];
@@ -122,14 +122,16 @@ export class EventLogger {
 
     const dataSql = `SELECT * FROM event_log ${whereClause} ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
     const dataParams = [...params, limit, offset];
-    const entries = this.db.prepare(dataSql).all(...dataParams) as EventLogEntry[];
+    const rows = this.db.prepare(dataSql).all(...dataParams) as RawEventLogRow[];
+    const entries = rows.map(toEventLogEntry);
 
     return { entries, total };
   }
 
   /** Return the most recent errors/critical entries. */
   getRecentErrors(limit: number = 50): EventLogEntry[] {
-    return this.stmtGetRecentErrors.all(limit) as EventLogEntry[];
+    const rows = this.stmtGetRecentErrors.all(limit) as RawEventLogRow[];
+    return rows.map(toEventLogEntry);
   }
 
   /** Delete events older than the given number of days. Returns rows removed. */
@@ -166,4 +168,34 @@ export class EventLogger {
       bySeverity,
     };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/** Raw row shape returned by better-sqlite3 (snake_case columns). */
+interface RawEventLogRow {
+  id: number;
+  timestamp: string;
+  category: string;
+  severity: string;
+  switch_mac: string | null;
+  switch_name: string | null;
+  message: string;
+  details: string | null;
+}
+
+/** Map a snake_case DB row to the camelCase EventLogEntry interface. */
+function toEventLogEntry(row: RawEventLogRow): EventLogEntry {
+  return {
+    id: row.id,
+    timestamp: row.timestamp,
+    category: row.category as EventCategory,
+    severity: row.severity as Severity,
+    switchMac: row.switch_mac ?? undefined,
+    switchName: row.switch_name ?? undefined,
+    message: row.message,
+    details: row.details ?? undefined,
+  };
 }

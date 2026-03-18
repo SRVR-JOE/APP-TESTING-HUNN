@@ -145,7 +145,7 @@ export const ScannerView: React.FC = () => {
 
   // Detect subnets on mount
   useEffect(() => {
-    api.getLocalSubnets().then((subs) => {
+    api.getLocalSubnets().then((subs: string[]) => {
       if (subs.length > 0) {
         setSubnets(subs);
         setSelectedSubnet(subs[0]);
@@ -188,7 +188,7 @@ export const ScannerView: React.FC = () => {
   }, [switches, searchQuery, activeFilters, sortField, sortDir]);
 
   const totalDevices = useMemo(
-    () => switches.reduce((acc, sw) => acc + sw.ports.filter((p) => p.operStatus === 'up').length, 0),
+    () => switches.reduce((acc: number, sw: SwitchInfo) => acc + sw.ports.filter((p: import('../types').PortInfo) => p.operStatus === 'up').length, 0),
     [switches],
   );
 

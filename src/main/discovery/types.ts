@@ -1,37 +1,13 @@
-export interface DiscoveredSwitch {
-  id: string;
-  name: string;
-  model: string;
-  ip: string;
-  mac: string;
-  firmware: string;
-  generation: 1 | 2;
-  serial: string;
-  isOnline: boolean;
-  lastSeen: string;
-  firstSeen: string;
-  rackGroup?: string;
-  location?: string;
-  poeTotal?: number;
-  poeBudget?: number;
-  portCount: number;
-  portsUp: number;
-  healthStatus: 'healthy' | 'warning' | 'critical' | 'offline';
-}
+// ============================================================================
+// Luminex Configurator — Discovery Types
+// ============================================================================
 
-export interface DiscoveredDevice {
-  id: number;
-  mac: string;
-  ip?: string;
-  hostname?: string;
-  manufacturer?: string;
-  protocol?: string;
-  connectedSwitchMac?: string;
-  connectedPort?: number;
-  linkSpeed?: string;
-  firstSeen: string;
-  lastSeen: string;
-}
+// Re-export core types from the single source of truth
+export type { DiscoveredSwitch, DiscoveredDevice, HealthStatus } from '../../shared/types';
+
+// ---------------------------------------------------------------------------
+// Discovery-specific types
+// ---------------------------------------------------------------------------
 
 export interface MdnsDiscoveryResult {
   name: string;

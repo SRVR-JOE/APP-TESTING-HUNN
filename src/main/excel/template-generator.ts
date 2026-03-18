@@ -88,7 +88,7 @@ export class TemplateGenerator {
    */
   async generateIPSchemeTemplate(outputPath: string): Promise<void> {
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'GigaCore Command';
+    workbook.creator = 'Luminex Configurator';
     workbook.created = new Date();
 
     this.buildIPSchemeSheet(workbook);
@@ -107,7 +107,7 @@ export class TemplateGenerator {
    */
   async generateProfileTemplate(outputPath: string): Promise<void> {
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'GigaCore Command';
+    workbook.creator = 'Luminex Configurator';
     workbook.created = new Date();
 
     this.buildProfileConfigSheet(workbook);
@@ -143,7 +143,7 @@ export class TemplateGenerator {
     outputPath: string,
   ): Promise<void> {
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'GigaCore Command';
+    workbook.creator = 'Luminex Configurator';
     workbook.created = new Date();
 
     // ── Sheet 1: IP Scheme ───────────────────────────────────────────────
@@ -377,7 +377,7 @@ export class TemplateGenerator {
 
     const lines = [
       '╔══════════════════════════════════════════════════════════════════╗',
-      '║          GigaCore Command — IP Scheme Template Guide           ║',
+      '║          Luminex Configurator — IP Scheme Template Guide           ║',
       '╚══════════════════════════════════════════════════════════════════╝',
       '',
       '── Sheet 1: IP Scheme ──────────────────────────────────────────────',
@@ -413,7 +413,7 @@ export class TemplateGenerator {
       '  • ISL ports use "ISL1", "ISL2" naming',
       '  • Duplicate management IPs will be highlighted in red',
       '  • Leave rows blank to skip — empty rows are ignored',
-      '  • Save as .xlsx before importing into GigaCore Command',
+      '  • Save as .xlsx before importing into Luminex Configurator',
     ];
 
     for (const line of lines) {
@@ -527,7 +527,7 @@ export class TemplateGenerator {
 
     const lines = [
       '╔══════════════════════════════════════════════════════════════════╗',
-      '║         GigaCore Command — Profile Template Guide              ║',
+      '║         Luminex Configurator — Profile Template Guide              ║',
       '╚══════════════════════════════════════════════════════════════════╝',
       '',
       '── Sheet 1: Profile Config ─────────────────────────────────────────',

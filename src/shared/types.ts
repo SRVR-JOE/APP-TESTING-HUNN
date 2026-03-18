@@ -1,4 +1,8 @@
-// ─── Enums ───────────────────────────────────────────────────────────────────
+// =============================================================================
+// Luminex Configurator — SINGLE SOURCE OF TRUTH for all shared types
+// =============================================================================
+
+// ---- Enums / Literal Unions -------------------------------------------------
 
 export type EventCategory =
   | 'discovery'
@@ -14,27 +18,59 @@ export type HealthStatus = 'healthy' | 'warning' | 'critical' | 'offline';
 
 export type SwitchGeneration = 1 | 2;
 
-// ─── Core Models ─────────────────────────────────────────────────────────────
+// ---- Sub-models used by DiscoveredSwitch ------------------------------------
+
+export interface SwitchGroup {
+  groupNumber: number;
+  name: string;
+  vlanId: number;
+  igmpSnooping: boolean;
+  igmpQuerier: boolean;
+  unknownFlooding: boolean;
+}
+
+export interface SwitchPort {
+  port: number;
+  label: string;
+  linkUp: boolean;
+  speedMbps: number;
+  maxSpeedMbps: number;
+  errorsPerMin: number;
+  isTrunk: boolean;
+  vlans: number[];
+  groupVlan?: string;
+  mode?: 'access' | 'trunk';
+  trunkGroups?: string;
+  poeEnabled?: boolean;
+  speed?: string;
+}
+
+// ---- Core Models ------------------------------------------------------------
 
 export interface DiscoveredSwitch {
   id: string;
   name: string;
   model: string;
   ip: string;
+  subnet?: string;
+  gateway?: string;
   mac: string;
   firmware: string;
   generation: SwitchGeneration;
-  serial: string;
-  isOnline: boolean;
+  serial?: string;
+  rackGroup?: string;
   lastSeen: string;
   firstSeen: string;
-  rackGroup?: string;
-  location?: string;
-  poeTotal?: number;
-  poeBudget?: number;
+  isOnline: boolean;
   portCount: number;
   portsUp: number;
   healthStatus: HealthStatus;
+  temperature?: number;
+  uptime?: string;
+  location?: string;
+  poe?: { budgetW: number; drawW: number };
+  groups?: SwitchGroup[];
+  ports?: SwitchPort[];
 }
 
 export interface DiscoveredDevice {
@@ -49,6 +85,23 @@ export interface DiscoveredDevice {
   linkSpeed?: string;
   firstSeen: string;
   lastSeen: string;
+}
+
+/**
+ * Input shape for inserting/upserting a device into the DB.
+ * Uses snake_case to match the database column names directly.
+ */
+export interface DiscoveredDeviceInput {
+  mac: string;
+  ip?: string;
+  hostname?: string;
+  manufacturer?: string;
+  protocol?: string;
+  connected_switch_mac?: string;
+  connected_port?: number;
+  link_speed?: string;
+  first_seen?: string;
+  last_seen?: string;
 }
 
 export interface EventLogEntry {
@@ -67,16 +120,65 @@ export interface PortStats {
   switchMac: string;
   port: number;
   timestamp: string;
-  rxBytes: number;
   txBytes: number;
-  rxPackets: number;
+  rxBytes: number;
   txPackets: number;
-  rxErrors: number;
-  txErrors: number;
-  linkUp: boolean;
-  speed: string;
+  rxPackets: number;
+  txBroadcast: number;
+  rxBroadcast: number;
+  txMulticast: number;
+  rxMulticast: number;
+  crcErrors: number;
+  collisions: number;
+  drops: number;
+  linkSpeed?: string;
   poeWatts?: number;
 }
+
+/**
+ * Input shape for recording a single port statistics snapshot.
+ * Uses snake_case to match the database column names directly.
+ */
+export interface PortStatsInput {
+  tx_bytes: number;
+  rx_bytes: number;
+  tx_packets: number;
+  rx_packets: number;
+  tx_broadcast: number;
+  rx_broadcast: number;
+  tx_multicast: number;
+  rx_multicast: number;
+  crc_errors: number;
+  collisions: number;
+  drops: number;
+  link_speed?: string;
+  poe_watts?: number;
+}
+
+/**
+ * Filters for querying the event log.
+ */
+export interface LogFilters {
+  category?: EventCategory[];
+  severity?: Severity[];
+  switchMac?: string;
+  startTime?: string;
+  endTime?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * Aggregate statistics about the event log.
+ */
+export interface EventLogStats {
+  total: number;
+  byCategory: Record<string, number>;
+  bySeverity: Record<string, number>;
+}
+
+// ---- Rack Map & Layout Models -----------------------------------------------
 
 export interface RackGroup {
   id: string;
@@ -104,6 +206,8 @@ export interface MapConnection {
   targetPort: number;
   label?: string;
 }
+
+// ---- Profile Models ---------------------------------------------------------
 
 export interface ShowPreset {
   id: string;
@@ -157,6 +261,8 @@ export interface VlanConfig {
   untagged: number[];
 }
 
+// ---- Health Check Models ----------------------------------------------------
+
 export interface HealthCheckResult {
   switchId: string;
   switchName: string;
@@ -173,7 +279,7 @@ export interface HealthCheck {
   threshold?: string | number;
 }
 
-// ─── IPC API Types ───────────────────────────────────────────────────────────
+// ---- IPC API Types ----------------------------------------------------------
 
 export interface ElectronAPI {
   // Discovery

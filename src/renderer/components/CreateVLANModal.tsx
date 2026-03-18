@@ -1,12 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { X, Plus, AlertCircle, Check, Eye } from 'lucide-react';
-
-export interface DiscoveredSwitch {
-  name: string;
-  ip: string;
-  model: string;
-  portCount: number;
-}
+import type { DiscoveredSwitch } from '@shared/types';
 
 export interface NewVLANConfig {
   vlanId: number;

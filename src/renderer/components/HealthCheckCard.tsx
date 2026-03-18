@@ -1,5 +1,5 @@
 // =============================================================================
-// GigaCore Command — Health Check Card Component
+// Luminex Configurator — Health Check Card Component
 // =============================================================================
 
 import React from 'react';
@@ -12,7 +12,9 @@ import {
   ChevronUp,
   RefreshCw,
 } from 'lucide-react';
-import type { HealthCheckResult, HealthStatus } from '../../main/troubleshoot/health-checks';
+import type { HealthCheckResult, CheckStatus } from '../../main/troubleshoot/health-checks';
+
+type HealthStatus = CheckStatus;
 
 // ---------------------------------------------------------------------------
 // Props

@@ -480,7 +480,7 @@ export class DiscoveryManager extends EventEmitter {
   private emitError(message: string, cause: unknown): void {
     const error =
       cause instanceof Error
-        ? new Error(`${message}: ${cause.message}`, { cause })
+        ? new Error(`${message}: ${cause.message}`)
         : new Error(message);
     this.emit('error', error);
   }

@@ -1,14 +1,14 @@
 // =============================================================================
-// GigaCore Command — Troubleshooting Module Exports
+// Luminex Configurator — Troubleshooting Module Exports
 // =============================================================================
 
 export {
   HealthCheckEngine,
   type HealthCheckResult,
   type HealthCheckDetail,
-  type HealthStatus,
-  type DiscoveredSwitch,
-  type SwitchPort,
+  type CheckStatus,
+  type HealthCheckSwitch,
+  type HealthCheckPort,
   type VlanDefinition,
   type IgmpConfig,
   type PoeStatus,

@@ -41,7 +41,7 @@ const CATEGORY_COLORS: Record<LogCategory, { bg: string; text: string; label: st
   user: { bg: 'bg-gray-500/20', text: 'text-gray-400', label: 'User' },
 };
 
-const SEVERITY_CONFIG: Record<LogSeverity, { icon: React.ComponentType<{ size?: number; className?: string }>; color: string; rowBg: string }> = {
+const SEVERITY_CONFIG: Record<LogSeverity, { icon: React.ComponentType<any>; color: string; rowBg: string }> = {
   info: { icon: Info, color: 'text-blue-400', rowBg: '' },
   warning: { icon: AlertTriangle, color: 'text-yellow-400', rowBg: 'bg-yellow-500/5' },
   error: { icon: XCircle, color: 'text-orange-400', rowBg: 'bg-orange-500/5' },

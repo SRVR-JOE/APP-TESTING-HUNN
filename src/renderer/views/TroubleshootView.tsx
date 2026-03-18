@@ -1,5 +1,5 @@
 // =============================================================================
-// GigaCore Command — Troubleshooting Dashboard View
+// Luminex Configurator — Troubleshooting Dashboard View
 // =============================================================================
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -26,7 +26,7 @@ import { HealthCheckCard } from '../components/HealthCheckCard';
 import { PingChart } from '../components/PingChart';
 import { SwitchCompare } from '../components/SwitchCompare';
 
-import type { HealthCheckResult, HealthStatus } from '../../main/troubleshoot/health-checks';
+import type { HealthCheckResult, CheckStatus } from '../../main/troubleshoot/health-checks';
 import type { PingResult } from '../../main/troubleshoot/ping-tool';
 import type { CompareResult } from '../../main/troubleshoot/quick-compare';
 
@@ -57,7 +57,7 @@ const MOCK_HEALTH_CHECKS: HealthCheckResult[] = [
       switchIp: sw.ip,
       value: `${Math.round(2 + Math.random() * 6)}ms`,
       threshold: '<10ms',
-      status: 'pass' as HealthStatus,
+      status: 'pass' as CheckStatus,
       message: `${sw.name} responded within acceptable latency`,
     })),
   },
@@ -169,7 +169,7 @@ const MOCK_HEALTH_CHECKS: HealthCheckResult[] = [
       switchIp: sw.ip,
       value: `${Math.round(28 + Math.random() * 10)}\u00B0C`,
       threshold: '<40\u00B0C',
-      status: 'pass' as HealthStatus,
+      status: 'pass' as CheckStatus,
       message: `${sw.name} temperature normal`,
     })),
   },
@@ -184,7 +184,7 @@ const MOCK_HEALTH_CHECKS: HealthCheckResult[] = [
       switchIp: sw.ip,
       value: '1 device',
       threshold: '1 device per IP',
-      status: 'pass' as HealthStatus,
+      status: 'pass' as CheckStatus,
       message: `${sw.ip} uniquely assigned to ${sw.name}`,
     })),
   },

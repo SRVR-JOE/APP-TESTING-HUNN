@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { GripVertical, ArrowUpDown } from 'lucide-react';
 import type { DiscoveredSwitch } from '@shared/types';
 
@@ -28,14 +28,15 @@ export const SequentialNaming: React.FC<SequentialNamingProps> = ({
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
 
   // Keep order in sync when switches change
-  useMemo(() => {
+  const switchIdKey = switches.map((s) => s.id).join(',');
+  useEffect(() => {
     const currentIds = new Set(order);
     const newIds = switches.map((s) => s.id);
     const hasNew = newIds.some((id) => !currentIds.has(id));
     if (hasNew || order.length !== newIds.length) {
       setOrder(newIds);
     }
-  }, [switches.map((s) => s.id).join(',')]);
+  }, [switchIdKey]);
 
   const assignments = useMemo(() => {
     return order

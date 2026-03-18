@@ -1,5 +1,5 @@
 // ============================================================================
-// GigaCore Command — Device Repository (CRUD for discovered_devices table)
+// Luminex Configurator — Device Repository (CRUD for discovered_devices table)
 // ============================================================================
 
 import type Database from 'better-sqlite3';
@@ -18,6 +18,13 @@ export class DeviceRepository {
   constructor(private manager: DatabaseManager) {
     this.db = manager.getDb();
 
+    // Create a composite unique index so upsert can match on the natural key
+    // (mac + connected_switch_mac + connected_port) rather than the autoincrement id.
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_device_natural_key
+        ON discovered_devices(mac, connected_switch_mac, connected_port)
+    `);
+
     // Upsert keyed on mac + connected_switch_mac + connected_port.
     // If the same device appears on the same switch port, update it;
     // otherwise insert a new row.
@@ -26,7 +33,7 @@ export class DeviceRepository {
         (mac, ip, hostname, manufacturer, protocol, connected_switch_mac, connected_port, link_speed, first_seen, last_seen)
       VALUES
         (@mac, @ip, @hostname, @manufacturer, @protocol, @connected_switch_mac, @connected_port, @link_speed, @first_seen, @last_seen)
-      ON CONFLICT(id) DO UPDATE SET
+      ON CONFLICT(mac, connected_switch_mac, connected_port) DO UPDATE SET
         ip                   = excluded.ip,
         hostname             = excluded.hostname,
         manufacturer         = excluded.manufacturer,
@@ -56,7 +63,7 @@ export class DeviceRepository {
   // Public API
   // --------------------------------------------------------------------------
 
-  /** Insert a device or update it if a row with the same id already exists. */
+  /** Insert a device or update it if a row with the same natural key already exists. */
   upsertDevice(device: DiscoveredDeviceInput): void {
     this.stmtUpsert.run({
       mac: device.mac ?? null,
@@ -72,19 +79,22 @@ export class DeviceRepository {
     });
   }
 
-  /** Return every discovered device. */
+  /** Return every discovered device, mapped to camelCase. */
   getAllDevices(): DiscoveredDevice[] {
-    return this.stmtGetAll.all() as DiscoveredDevice[];
+    const rows = this.stmtGetAll.all() as RawDeviceRow[];
+    return rows.map(toDiscoveredDevice);
   }
 
   /** Return all devices connected to a particular switch (by MAC). */
   getDevicesBySwitch(switchMac: string): DiscoveredDevice[] {
-    return this.stmtGetBySwitch.all(switchMac) as DiscoveredDevice[];
+    const rows = this.stmtGetBySwitch.all(switchMac) as RawDeviceRow[];
+    return rows.map(toDiscoveredDevice);
   }
 
   /** Return all devices discovered via a specific protocol (e.g. 'lldp', 'arp'). */
   getDevicesByProtocol(protocol: string): DiscoveredDevice[] {
-    return this.stmtGetByProtocol.all(protocol) as DiscoveredDevice[];
+    const rows = this.stmtGetByProtocol.all(protocol) as RawDeviceRow[];
+    return rows.map(toDiscoveredDevice);
   }
 
   /**
@@ -96,4 +106,40 @@ export class DeviceRepository {
     const result = this.stmtDeleteStale.run(iso);
     return result.changes;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/** Raw row shape returned by better-sqlite3 (snake_case columns). */
+interface RawDeviceRow {
+  id: number;
+  mac: string | null;
+  ip: string | null;
+  hostname: string | null;
+  manufacturer: string | null;
+  protocol: string | null;
+  connected_switch_mac: string | null;
+  connected_port: number | null;
+  link_speed: string | null;
+  first_seen: string | null;
+  last_seen: string | null;
+}
+
+/** Map a snake_case DB row to the camelCase DiscoveredDevice interface. */
+function toDiscoveredDevice(row: RawDeviceRow): DiscoveredDevice {
+  return {
+    id: row.id,
+    mac: row.mac ?? '',
+    ip: row.ip ?? undefined,
+    hostname: row.hostname ?? undefined,
+    manufacturer: row.manufacturer ?? undefined,
+    protocol: row.protocol ?? undefined,
+    connectedSwitchMac: row.connected_switch_mac ?? undefined,
+    connectedPort: row.connected_port ?? undefined,
+    linkSpeed: row.link_speed ?? undefined,
+    firstSeen: row.first_seen ?? '',
+    lastSeen: row.last_seen ?? '',
+  };
 }

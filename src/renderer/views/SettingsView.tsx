@@ -651,13 +651,13 @@ export default function SettingsView() {
         {/* ── About ────────────────────────────────────────────────── */}
         {activeSection === 'about' && (
           <>
-            <SectionCard title="About GigaCore Command" icon={<Info size={18} />}>
+            <SectionCard title="About Luminex Configurator" icon={<Info size={18} />}>
               <div className="flex items-center gap-4 mb-4">
                 <div className="w-14 h-14 rounded-xl bg-gc-accent/10 flex items-center justify-center">
                   <Settings size={28} className="text-gc-accent" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold">GigaCore Command</h3>
+                  <h3 className="text-lg font-bold">Luminex Configurator</h3>
                   <p className="text-sm text-gray-400">
                     Luminex GigaCore switch management application
                   </p>
@@ -678,7 +678,7 @@ export default function SettingsView() {
               </SettingRow>
               <SettingRow label="Database Path">
                 <span className="text-xs font-mono text-gray-400 break-all">
-                  ~/Library/Application Support/gigacore-command/data.db
+                  ~/Library/Application Support/luminex-configurator/data.db
                 </span>
               </SettingRow>
             </SectionCard>

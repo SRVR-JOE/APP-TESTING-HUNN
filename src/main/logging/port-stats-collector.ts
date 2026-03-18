@@ -1,5 +1,5 @@
 // ============================================================================
-// GigaCore Command — Port Statistics Collector
+// Luminex Configurator — Port Statistics Collector
 // ============================================================================
 
 import type Database from 'better-sqlite3';
@@ -109,23 +109,26 @@ export class PortStatsCollector {
 
   /**
    * Retrieve port stats for a specific switch + port within a time range.
+   * Returns camelCase PortStats objects.
    */
   getStats(
     switchMac: string,
     port: number,
     timeRange: { start: string; end: string },
   ): PortStats[] {
-    return this.stmtGetRange.all(
+    const rows = this.stmtGetRange.all(
       switchMac,
       port,
       timeRange.start,
       timeRange.end,
-    ) as PortStats[];
+    ) as RawPortStatsRow[];
+    return rows.map(toPortStats);
   }
 
   /** Return the latest stats snapshot for every port on a switch. */
   getLatestStats(switchMac: string): PortStats[] {
-    return this.stmtGetLatest.all(switchMac, switchMac) as PortStats[];
+    const rows = this.stmtGetLatest.all(switchMac, switchMac) as RawPortStatsRow[];
+    return rows.map(toPortStats);
   }
 
   /** Delete stats older than the given number of days. Returns rows removed. */
@@ -133,4 +136,52 @@ export class PortStatsCollector {
     const result = this.stmtPurge.run(days);
     return result.changes;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/** Raw row shape returned by better-sqlite3 (snake_case columns). */
+interface RawPortStatsRow {
+  id: number;
+  timestamp: string;
+  switch_mac: string;
+  port: number;
+  tx_bytes: number;
+  rx_bytes: number;
+  tx_packets: number;
+  rx_packets: number;
+  tx_broadcast: number;
+  rx_broadcast: number;
+  tx_multicast: number;
+  rx_multicast: number;
+  crc_errors: number;
+  collisions: number;
+  drops: number;
+  link_speed: string | null;
+  poe_watts: number | null;
+}
+
+/** Map a snake_case DB row to the camelCase PortStats interface. */
+function toPortStats(row: RawPortStatsRow): PortStats {
+  return {
+    id: row.id,
+    switchMac: row.switch_mac,
+    port: row.port,
+    timestamp: row.timestamp,
+    txBytes: row.tx_bytes,
+    rxBytes: row.rx_bytes,
+    txPackets: row.tx_packets,
+    rxPackets: row.rx_packets,
+    txBroadcast: row.tx_broadcast,
+    rxBroadcast: row.rx_broadcast,
+    txMulticast: row.tx_multicast,
+    rxMulticast: row.rx_multicast,
+    crcErrors: row.crc_errors,
+    collisions: row.collisions,
+    drops: row.drops,
+    linkSpeed: row.link_speed ?? undefined,
+    poeWatts: row.poe_watts ?? undefined,
+  };
 }

@@ -1,9 +1,10 @@
 // ============================================================================
-// GigaCore Command — Authentication / Credential Manager
+// Luminex Configurator — Authentication / Credential Manager
 // In-memory credential storage per switch, with future keytar integration.
 // ============================================================================
 
 import axios from 'axios';
+import { safeStorage } from 'electron';
 
 import {
   ApiError,
@@ -14,12 +15,43 @@ import {
 const DEFAULT_USERNAME = 'admin';
 const DEFAULT_PASSWORD = '';
 
+interface EncryptedCredentials {
+  username: string;
+  encryptedPassword: Buffer;
+}
+
 export class AuthManager {
-  private credentials: Map<string, SwitchCredentials> = new Map();
+  private credentials: Map<string, EncryptedCredentials> = new Map();
   private defaultCredentials = {
     username: DEFAULT_USERNAME,
     password: DEFAULT_PASSWORD,
   };
+
+  // ---------------------------------------------------------------------------
+  // Encryption helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Encrypt a password before storing using Electron's safeStorage API.
+   */
+  private encryptPassword(password: string): Buffer {
+    if (safeStorage.isEncryptionAvailable()) {
+      return safeStorage.encryptString(password);
+    }
+    // Fallback: store as-is (log warning)
+    console.warn('safeStorage not available — credentials stored in memory only');
+    return Buffer.from(password, 'utf-8');
+  }
+
+  /**
+   * Decrypt a stored password using Electron's safeStorage API.
+   */
+  private decryptPassword(encrypted: Buffer): string {
+    if (safeStorage.isEncryptionAvailable()) {
+      return safeStorage.decryptString(encrypted);
+    }
+    return encrypted.toString('utf-8');
+  }
 
   // ---------------------------------------------------------------------------
   // Per-switch credentials
@@ -30,15 +62,25 @@ export class AuthManager {
    * The switchId is typically the switch IP or a unique identifier.
    */
   setCredentials(switchId: string, username: string, password: string): void {
-    this.credentials.set(switchId, { switchId, username, password });
+    this.credentials.set(switchId, {
+      username,
+      encryptedPassword: this.encryptPassword(password),
+    });
   }
 
   /**
    * Retrieve stored credentials for a switch.
    * Returns undefined if no credentials have been stored.
+   * Decrypts the password before returning.
    */
   getCredentials(switchId: string): SwitchCredentials | undefined {
-    return this.credentials.get(switchId);
+    const stored = this.credentials.get(switchId);
+    if (!stored) return undefined;
+    return {
+      switchId,
+      username: stored.username,
+      password: this.decryptPassword(stored.encryptedPassword),
+    };
   }
 
   /**
@@ -74,7 +116,10 @@ export class AuthManager {
   resolveCredentials(switchId: string): { username: string; password: string } {
     const stored = this.credentials.get(switchId);
     if (stored) {
-      return { username: stored.username, password: stored.password };
+      return {
+        username: stored.username,
+        password: this.decryptPassword(stored.encryptedPassword),
+      };
     }
     return this.getDefaultCredentials();
   }

@@ -1,5 +1,5 @@
 // ============================================================================
-// GigaCore Command — Log Exporter (CSV, JSON, Excel)
+// Luminex Configurator — Log Exporter (CSV, JSON, Excel)
 // ============================================================================
 
 import fs from 'fs';
@@ -37,8 +37,8 @@ export class LogExporter {
           csvEscape(entry.timestamp),
           csvEscape(entry.category),
           csvEscape(entry.severity),
-          csvEscape(entry.switch_mac ?? ''),
-          csvEscape(entry.switch_name ?? ''),
+          csvEscape(entry.switchMac ?? ''),
+          csvEscape(entry.switchName ?? ''),
           csvEscape(entry.message),
           csvEscape(entry.details ?? ''),
         ].join(','),
@@ -107,8 +107,8 @@ export class LogExporter {
         timestamp: entry.timestamp,
         category: entry.category,
         severity: entry.severity,
-        switch_mac: entry.switch_mac ?? '',
-        switch_name: entry.switch_name ?? '',
+        switch_mac: entry.switchMac ?? '',
+        switch_name: entry.switchName ?? '',
         message: entry.message,
         details: entry.details ?? '',
       });

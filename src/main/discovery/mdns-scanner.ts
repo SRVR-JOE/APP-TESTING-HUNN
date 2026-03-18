@@ -6,7 +6,7 @@
  * implementation suitable for Electron main-process usage.
  */
 
-import Bonjour, { type Browser, type RemoteService } from 'bonjour-service';
+import Bonjour, { type Browser } from 'bonjour-service';
 import type { MdnsDiscoveryResult } from './types';
 
 /** Service types we actively browse for. */
@@ -39,7 +39,7 @@ export class MdnsScanner {
       try {
         const browser = this.bonjour.find(
           { type: svc.type, protocol: svc.protocol },
-          (service: RemoteService) => {
+          (service: any) => {
             const result = this.serviceToResult(service, svc.type);
             if (result) {
               onFound(result);
@@ -109,7 +109,7 @@ export class MdnsScanner {
   // ── Helpers ────────────────────────────────────────────────────────────
 
   private serviceToResult(
-    service: RemoteService,
+    service: any,
     type: string,
   ): MdnsDiscoveryResult | null {
     // Prefer the first IPv4 address

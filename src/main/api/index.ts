@@ -1,5 +1,5 @@
 // ============================================================================
-// GigaCore Command — API Module Barrel Exports
+// Luminex Configurator — API Module Barrel Exports
 // ============================================================================
 
 // Types

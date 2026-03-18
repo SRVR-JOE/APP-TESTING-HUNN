@@ -1,5 +1,5 @@
 /**
- * Network discovery engine for GigaCore Command.
+ * Network discovery engine for Luminex Configurator.
  *
  * Re-exports all public classes and types from the discovery module.
  */

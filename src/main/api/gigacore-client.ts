@@ -1,5 +1,5 @@
 // ============================================================================
-// GigaCore Command — Unified REST API Client
+// Luminex Configurator — Unified REST API Client
 // Handles both Gen1 (HTTP GET/POST) and Gen2 (REST JSON) GigaCore switches.
 // Runs in the Electron main process.
 // ============================================================================
@@ -156,7 +156,7 @@ export class GigaCoreClient {
 
   async getSystemInfo(): Promise<SwitchSystemInfo> {
     if (this.generation === 2) {
-      const data = await this.gen2Get<any>('/api/system');
+      const data = await this.withRetry(() => this.gen2Get<any>('/api/system'));
       return {
         name: data.name ?? data.systemName ?? '',
         model: data.model ?? '',
@@ -203,7 +203,7 @@ export class GigaCoreClient {
 
   async getPorts(): Promise<PortInfo[]> {
     if (this.generation === 2) {
-      const data = await this.gen2Get<any>('/api/ports');
+      const data = await this.withRetry(() => this.gen2Get<any>('/api/ports'));
       const ports: any[] = Array.isArray(data) ? data : data.ports ?? [];
       return ports.map((p: any) => this.mapGen2Port(p));
     }
@@ -214,7 +214,7 @@ export class GigaCoreClient {
 
   async getPort(portNumber: number): Promise<PortInfo> {
     if (this.generation === 2) {
-      const data = await this.gen2Get<any>(`/api/ports/${portNumber}`);
+      const data = await this.withRetry(() => this.gen2Get<any>(`/api/ports/${portNumber}`));
       return this.mapGen2Port(data);
     }
 
@@ -299,7 +299,7 @@ export class GigaCoreClient {
 
   async getGroups(): Promise<GroupConfig[]> {
     if (this.generation === 2) {
-      const data = await this.gen2Get<any>('/api/groups');
+      const data = await this.withRetry(() => this.gen2Get<any>('/api/groups'));
       const groups: any[] = Array.isArray(data) ? data : data.groups ?? [];
       return groups.map((g: any) => this.mapGen2Group(g));
     }
@@ -310,7 +310,7 @@ export class GigaCoreClient {
 
   async getGroup(id: number): Promise<GroupConfig> {
     if (this.generation === 2) {
-      const data = await this.gen2Get<any>(`/api/groups/${id}`);
+      const data = await this.withRetry(() => this.gen2Get<any>(`/api/groups/${id}`));
       return this.mapGen2Group(data);
     }
 
@@ -364,7 +364,7 @@ export class GigaCoreClient {
 
   async getPoeSummary(): Promise<PoeSummary> {
     if (this.generation === 2) {
-      const data = await this.gen2Get<any>('/api/poe');
+      const data = await this.withRetry(() => this.gen2Get<any>('/api/poe'));
       return {
         available: data.available ?? true,
         totalBudgetWatts: data.totalBudgetWatts ?? data.budget ?? 0,
@@ -412,7 +412,7 @@ export class GigaCoreClient {
 
   async getIgmpConfig(): Promise<IgmpConfig> {
     if (this.generation === 2) {
-      const data = await this.gen2Get<any>('/api/igmp');
+      const data = await this.withRetry(() => this.gen2Get<any>('/api/igmp'));
       return {
         globalEnabled: data.globalEnabled ?? data.enabled ?? false,
         perGroup: (data.perGroup ?? data.groups ?? []).map((g: any) => ({
@@ -461,7 +461,7 @@ export class GigaCoreClient {
 
   async getProfiles(): Promise<SwitchProfileSlot[]> {
     if (this.generation === 2) {
-      const data = await this.gen2Get<any>('/api/profiles');
+      const data = await this.withRetry(() => this.gen2Get<any>('/api/profiles'));
       const slots: any[] = Array.isArray(data) ? data : data.profiles ?? [];
       return slots.map((s: any) => ({
         slot: s.slot,
@@ -499,7 +499,7 @@ export class GigaCoreClient {
 
   async getLldpNeighbors(): Promise<LldpNeighborInfo[]> {
     if (this.generation === 2) {
-      const data = await this.gen2Get<any>('/api/lldp');
+      const data = await this.withRetry(() => this.gen2Get<any>('/api/lldp'));
       const neighbors: any[] = Array.isArray(data)
         ? data
         : data.neighbors ?? [];
@@ -525,7 +525,7 @@ export class GigaCoreClient {
 
   async getPortStats(): Promise<PortStatistics[]> {
     if (this.generation === 2) {
-      const data = await this.gen2Get<any>('/api/ports/statistics');
+      const data = await this.withRetry(() => this.gen2Get<any>('/api/ports/statistics'));
       const stats: any[] = Array.isArray(data) ? data : data.statistics ?? [];
       return stats.map((s: any) => ({
         port: s.port,
@@ -625,7 +625,7 @@ export class GigaCoreClient {
 
   async getIpConfig(): Promise<IpConfig> {
     if (this.generation === 2) {
-      const data = await this.gen2Get<any>('/api/system/network');
+      const data = await this.withRetry(() => this.gen2Get<any>('/api/system/network'));
       return {
         ip: data.ip ?? data.ipAddress ?? '',
         subnet: data.subnet ?? data.subnetMask ?? '',
@@ -666,6 +666,29 @@ export class GigaCoreClient {
   /** Attach a logging hook for every request/response cycle. */
   setLogHook(hook: RequestLogHook): void {
     this.logHook = hook;
+  }
+
+  // =========================================================================
+  // Retry helper (exponential backoff for idempotent read operations)
+  // =========================================================================
+
+  private async withRetry<T>(
+    fn: () => Promise<T>,
+    retries: number = 2,
+    delayMs: number = 500,
+  ): Promise<T> {
+    let lastError: Error | undefined;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        return await fn();
+      } catch (error) {
+        lastError = error as Error;
+        if (attempt < retries) {
+          await new Promise(r => setTimeout(r, delayMs * Math.pow(2, attempt)));
+        }
+      }
+    }
+    throw lastError;
   }
 
   // =========================================================================

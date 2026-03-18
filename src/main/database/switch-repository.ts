@@ -1,10 +1,10 @@
 // ============================================================================
-// GigaCore Command — Switch Repository (CRUD for switches table)
+// Luminex Configurator — Switch Repository (CRUD for switches table)
 // ============================================================================
 
 import type Database from 'better-sqlite3';
 import { DatabaseManager } from './database';
-import { DiscoveredSwitch } from '../../shared/types';
+import { DiscoveredSwitch, HealthStatus } from '../../shared/types';
 
 export class SwitchRepository {
   private db: Database.Database;
@@ -58,7 +58,7 @@ export class SwitchRepository {
   // Public API
   // --------------------------------------------------------------------------
 
-  /** Insert or update a switch (keyed on id). */
+  /** Insert or update a switch (keyed on id). Accepts camelCase DiscoveredSwitch. */
   upsertSwitch(sw: DiscoveredSwitch): void {
     this.stmtUpsert.run({
       id: sw.id,
@@ -71,10 +71,10 @@ export class SwitchRepository {
       firmware: sw.firmware ?? null,
       generation: sw.generation ?? null,
       serial: sw.serial ?? null,
-      rack_group: sw.rack_group ?? null,
-      last_seen: sw.last_seen ?? null,
-      first_seen: sw.first_seen ?? null,
-      is_online: sw.is_online ? 1 : 0,
+      rack_group: sw.rackGroup ?? null,
+      last_seen: sw.lastSeen ?? null,
+      first_seen: sw.firstSeen ?? null,
+      is_online: sw.isOnline ? 1 : 0,
     });
   }
 
@@ -116,7 +116,7 @@ export class SwitchRepository {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/** Raw row shape returned by better-sqlite3 (booleans come back as 0/1). */
+/** Raw row shape returned by better-sqlite3 (snake_case, booleans as 0/1). */
 interface RawSwitchRow {
   id: string;
   name: string | null;
@@ -134,9 +134,27 @@ interface RawSwitchRow {
   is_online: number;
 }
 
+/** Map a snake_case DB row to the camelCase DiscoveredSwitch interface. */
 function toDiscoveredSwitch(row: RawSwitchRow): DiscoveredSwitch {
+  const isOnline = row.is_online === 1;
+
   return {
-    ...row,
-    is_online: row.is_online === 1,
+    id: row.id,
+    name: row.name ?? '',
+    model: row.model ?? '',
+    ip: row.ip ?? '',
+    subnet: row.subnet ?? undefined,
+    gateway: row.gateway ?? undefined,
+    mac: row.mac ?? '',
+    firmware: row.firmware ?? '',
+    generation: (row.generation ?? 1) as 1 | 2,
+    serial: row.serial ?? undefined,
+    rackGroup: row.rack_group ?? undefined,
+    lastSeen: row.last_seen ?? '',
+    firstSeen: row.first_seen ?? '',
+    isOnline,
+    portCount: 0,
+    portsUp: 0,
+    healthStatus: (isOnline ? 'healthy' : 'offline') as HealthStatus,
   };
 }

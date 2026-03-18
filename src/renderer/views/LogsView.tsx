@@ -144,7 +144,7 @@ const MESSAGE_TEMPLATES: Record<
   system: [
     {
       severity: 'info',
-      msg: 'GigaCore Command started — scanning network 10.0.1.0/24',
+      msg: 'Luminex Configurator started — scanning network 10.0.1.0/24',
     },
     {
       severity: 'info',
@@ -242,10 +242,14 @@ function generateMockPortStats(): PortStats[] {
           txBytes: cumTx,
           rxPackets: cumRxPkt,
           txPackets: cumTxPkt,
-          rxErrors: hasErrors ? Math.floor(Math.random() * 20) : 0,
-          txErrors: hasErrors ? Math.floor(Math.random() * 5) : 0,
-          linkUp: Math.random() > 0.02,
-          speed: '1Gbps',
+          txBroadcast: Math.floor(Math.random() * 1000),
+          rxBroadcast: Math.floor(Math.random() * 1000),
+          txMulticast: Math.floor(Math.random() * 500),
+          rxMulticast: Math.floor(Math.random() * 500),
+          crcErrors: hasErrors ? Math.floor(Math.random() * 20) : 0,
+          collisions: hasErrors ? Math.floor(Math.random() * 5) : 0,
+          drops: hasErrors ? Math.floor(Math.random() * 3) : 0,
+          linkSpeed: '1Gbps',
           poeWatts: port <= 2 ? 8 + Math.random() * 20 : undefined,
         });
       }
@@ -500,14 +504,14 @@ function PortStatisticsTab() {
                   Port {s.port}{' '}
                   <span
                     className={`ml-1 px-1.5 py-0.5 rounded text-[10px] ${
-                      s.linkUp
+                      s.linkSpeed
                         ? 'bg-green-500/20 text-green-400'
                         : 'bg-red-500/20 text-red-400'
                     }`}
                   >
-                    {s.linkUp ? 'UP' : 'DOWN'}
+                    {s.linkSpeed ? 'UP' : 'DOWN'}
                   </span>
-                  <span className="ml-1 text-gray-600">{s.speed}</span>
+                  <span className="ml-1 text-gray-600">{s.linkSpeed ?? ''}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
                   <div>
@@ -538,12 +542,12 @@ function PortStatisticsTab() {
                     <span className="text-gray-500">Errors</span>
                     <div
                       className={`font-mono ${
-                        s.rxErrors + s.txErrors > 0
+                        s.crcErrors + s.collisions > 0
                           ? 'text-red-400'
                           : 'text-gray-500'
                       }`}
                     >
-                      {s.rxErrors + s.txErrors}
+                      {s.crcErrors + s.collisions}
                     </div>
                   </div>
                   <div>
@@ -561,7 +565,7 @@ function PortStatisticsTab() {
                   <div className="col-span-2">
                     <span className="text-gray-500">Link Duration</span>
                     <div className="text-gray-300 font-mono">
-                      {s.linkUp ? '2h 14m' : '--'}
+                      {s.linkSpeed ? '2h 14m' : '--'}
                     </div>
                   </div>
                 </div>

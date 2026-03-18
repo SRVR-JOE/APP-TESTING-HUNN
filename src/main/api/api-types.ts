@@ -1,5 +1,5 @@
 // ============================================================================
-// GigaCore Command — API Type Definitions
+// Luminex Configurator — API Type Definitions
 // All TypeScript interfaces for GigaCore switch API request/response payloads.
 // ============================================================================
 

@@ -1,9 +1,72 @@
 // ============================================================
-// GigaCore Command — Shared Type Definitions
+// Luminex Configurator — Renderer Type Definitions
 // ============================================================
 
-// Re-export shared types used by logging components
-export type { EventCategory, Severity, EventLogEntry, PortStats } from '../../shared/types';
+// Re-export all shared types as the single source of truth
+export type {
+  EventCategory,
+  Severity,
+  HealthStatus,
+  SwitchGeneration,
+  DiscoveredSwitch,
+  DiscoveredDevice,
+  EventLogEntry,
+  PortStats,
+  LogFilters,
+  EventLogStats,
+  SwitchGroup,
+  SwitchPort,
+  RackGroup,
+  MapLayout,
+  MapConnection,
+  ShowPreset,
+  SwitchPresetConfig,
+  PortOverride,
+  SwitchProfile,
+  PortConfig,
+  VlanConfig,
+  HealthCheckResult,
+  HealthCheck,
+} from '../../shared/types';
+
+// ---- Renderer-specific types ------------------------------------------------
+
+/**
+ * SwitchInfo is the renderer-side view-model for a discovered switch,
+ * shaped for UI components (SwitchCard, ScannerView, etc.).
+ */
+export interface SwitchInfo {
+  id: string;
+  name: string;
+  model: string;
+  ip: string;
+  mac: string;
+  firmware: string;
+  status: 'healthy' | 'warning' | 'critical' | 'offline';
+  ports: PortInfo[];
+  poeBudgetWatts: number;
+  poeDrawWatts: number;
+  uptime?: string;
+  location?: string;
+  rackGroup?: string;
+  lastSeen: string;
+}
+
+/**
+ * Renderer-side ElectronAPI surface used by hooks/useElectronAPI.
+ * Covers the mock API methods consumed throughout the renderer.
+ */
+export interface ElectronAPI {
+  scanSubnet: (subnet: string) => Promise<SwitchInfo[]>;
+  getSwitches: () => Promise<SwitchInfo[]>;
+  getDiscoveredDevices: () => Promise<import('../../shared/types').DiscoveredDevice[]>;
+  pingSwitch: (ip: string) => Promise<{ alive: boolean; latency: number }>;
+  openWebUI: (ip: string) => void;
+  exportCSV: (data: unknown[], filename: string) => Promise<void>;
+  getLocalSubnets: () => Promise<string[]>;
+  onScanProgress: (cb: (progress: number) => void) => () => void;
+  onSwitchUpdate: (cb: (switches: SwitchInfo[]) => void) => () => void;
+}
 
 export interface PortInfo {
   port: number;
@@ -19,39 +82,6 @@ export interface PortInfo {
   poeWatts?: number;
 }
 
-export type HealthStatus = 'healthy' | 'warning' | 'critical' | 'offline';
-
-export interface SwitchInfo {
-  id: string;
-  name: string;
-  model: string;
-  ip: string;
-  mac: string;
-  firmware: string;
-  status: HealthStatus;
-  ports: PortInfo[];
-  poeBudgetWatts: number;
-  poeDrawWatts: number;
-  uptime?: string;
-  location?: string;
-  rackGroup?: string;
-  lastSeen: string;
-}
-
-export interface DiscoveredDevice {
-  id: string;
-  name: string;
-  hostname?: string;
-  ip: string;
-  mac: string;
-  manufacturer: string;
-  protocol: 'Dante' | 'NDI' | 'Art-Net' | 'AES67' | 'unknown';
-  connectedSwitch?: string;
-  connectedPort?: number;
-  status: 'online' | 'offline';
-  lastSeen: string;
-}
-
 export interface FilterDefinition {
   key: string;
   label: string;
@@ -61,22 +91,4 @@ export interface FilterDefinition {
 export interface SortOption {
   value: string;
   label: string;
-}
-
-export interface ElectronAPI {
-  scanSubnet: (subnet: string) => Promise<SwitchInfo[]>;
-  getSwitches: () => Promise<SwitchInfo[]>;
-  getDiscoveredDevices: () => Promise<DiscoveredDevice[]>;
-  pingSwitch: (ip: string) => Promise<{ alive: boolean; latency: number }>;
-  openWebUI: (ip: string) => void;
-  exportCSV: (data: unknown[], filename: string) => Promise<void>;
-  getLocalSubnets: () => Promise<string[]>;
-  onScanProgress: (callback: (progress: number) => void) => () => void;
-  onSwitchUpdate: (callback: (switches: SwitchInfo[]) => void) => () => void;
-}
-
-declare global {
-  interface Window {
-    electronAPI?: ElectronAPI;
-  }
 }

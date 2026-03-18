@@ -11,7 +11,7 @@ export interface DeviceNodeData {
   showLabels?: boolean;
 }
 
-const PROTOCOL_CONFIG: Record<string, { icon: React.ComponentType<{ size?: number; className?: string }>; color: string; label: string }> = {
+const PROTOCOL_CONFIG: Record<string, { icon: React.ComponentType<any>; color: string; label: string }> = {
   Dante:    { icon: AudioWaveform, color: '#22c55e', label: 'Dante' },
   NDI:      { icon: Video,         color: '#3b82f6', label: 'NDI' },
   'Art-Net': { icon: Lightbulb,    color: '#f59e0b', label: 'Art-Net' },

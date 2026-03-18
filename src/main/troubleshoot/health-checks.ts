@@ -1,18 +1,25 @@
 // =============================================================================
-// GigaCore Command — Troubleshooting: Health Check Engine
+// Luminex Configurator — Troubleshooting: Health Check Engine
 // =============================================================================
 
+import { exec } from 'child_process';
+
 // ---------------------------------------------------------------------------
-// Types
+// Types  (health-check domain — richer than the shared DiscoveredSwitch)
 // ---------------------------------------------------------------------------
 
-export interface DiscoveredSwitch {
+/**
+ * Extended switch snapshot used exclusively by the health-check engine.
+ * Contains live diagnostic fields (vlans, igmp, rlink, sfpSlots) that go
+ * beyond what the shared DiscoveredSwitch carries.
+ */
+export interface HealthCheckSwitch {
   name: string;
   ip: string;
   model: string;
   firmware: string;
-  macAddress: string;
-  ports: SwitchPort[];
+  mac: string;
+  ports: HealthCheckPort[];
   vlans: VlanDefinition[];
   igmp: IgmpConfig;
   poe?: PoeStatus;
@@ -21,7 +28,7 @@ export interface DiscoveredSwitch {
   sfpSlots?: SfpSlot[];
 }
 
-export interface SwitchPort {
+export interface HealthCheckPort {
   port: number;
   label: string;
   linkUp: boolean;
@@ -72,7 +79,12 @@ export interface SfpSlot {
 // Health Check Result Types
 // ---------------------------------------------------------------------------
 
-export type HealthStatus = 'pass' | 'warning' | 'fail' | 'critical';
+/**
+ * Check-level status used by the health-check engine.
+ * Distinct from the shared HealthStatus ('healthy'|'warning'|'critical'|'offline')
+ * which represents overall switch health as persisted in the DB.
+ */
+export type CheckStatus = 'pass' | 'warning' | 'fail' | 'critical';
 
 export interface HealthCheckDetail {
   switchName?: string;
@@ -80,14 +92,14 @@ export interface HealthCheckDetail {
   port?: number;
   value?: string;
   threshold?: string;
-  status: HealthStatus;
+  status: CheckStatus;
   message: string;
 }
 
 export interface HealthCheckResult {
   checkName: string;
   displayName: string;
-  status: HealthStatus;
+  status: CheckStatus;
   message: string;
   details: HealthCheckDetail[];
   runAt: string;
@@ -107,14 +119,14 @@ const KNOWN_BAD_FIRMWARE: string[] = [
 // Helpers
 // ---------------------------------------------------------------------------
 
-function worstStatus(statuses: HealthStatus[]): HealthStatus {
-  const priority: Record<HealthStatus, number> = {
+function worstStatus(statuses: CheckStatus[]): CheckStatus {
+  const priority: Record<CheckStatus, number> = {
     pass: 0,
     warning: 1,
     fail: 2,
     critical: 3,
   };
-  let worst: HealthStatus = 'pass';
+  let worst: CheckStatus = 'pass';
   for (const s of statuses) {
     if (priority[s] > priority[worst]) worst = s;
   }
@@ -125,14 +137,55 @@ function now(): string {
   return new Date().toISOString();
 }
 
-/** Simulate a network ping (in a real app this would use raw ICMP sockets). */
+/** Perform a real network ping using the system ping command. */
 async function simulatePing(ip: string): Promise<{ alive: boolean; latencyMs: number }> {
-  // Simulate variable latency between 1-300ms with occasional timeouts
-  await new Promise((r) => setTimeout(r, Math.random() * 20));
-  const roll = Math.random();
-  if (roll < 0.05) return { alive: false, latencyMs: -1 };
-  const latencyMs = Math.round(Math.random() * 150 + 1);
-  return { alive: true, latencyMs };
+  return new Promise((resolve) => {
+    // Validate IP/host — prevent command injection
+    if (!/^[\w.\-:]+$/.test(ip)) {
+      resolve({ alive: false, latencyMs: -1 });
+      return;
+    }
+
+    const isWindows = process.platform === 'win32';
+    const timeoutMs = 3000;
+    const timeoutSec = Math.max(1, Math.ceil(timeoutMs / 1000));
+
+    const cmd = isWindows
+      ? `ping -n 1 -w ${timeoutMs} ${ip}`
+      : `ping -c 1 -W ${timeoutSec} ${ip}`;
+
+    const startTime = performance.now();
+
+    exec(cmd, { timeout: timeoutMs + 2000 }, (error, stdout) => {
+      const elapsed = performance.now() - startTime;
+
+      if (error) {
+        resolve({ alive: false, latencyMs: -1 });
+        return;
+      }
+
+      let latencyMs = -1;
+
+      if (isWindows) {
+        const match = stdout.match(/time[=<](\d+(?:\.\d+)?)\s*ms/i);
+        if (match) {
+          latencyMs = parseFloat(match[1]);
+        }
+      } else {
+        const match = stdout.match(/time[=](\d+(?:\.\d+)?)\s*ms/i);
+        if (match) {
+          latencyMs = parseFloat(match[1]);
+        }
+      }
+
+      // Fallback to elapsed time if parsing failed but command succeeded
+      if (latencyMs === -1 && !error) {
+        latencyMs = Math.round(elapsed * 100) / 100;
+      }
+
+      resolve({ alive: latencyMs >= 0, latencyMs });
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -144,7 +197,7 @@ export class HealthCheckEngine {
   // Run all checks
   // -------------------------------------------------------------------------
 
-  async runAll(switches: DiscoveredSwitch[]): Promise<HealthCheckResult[]> {
+  async runAll(switches: HealthCheckSwitch[]): Promise<HealthCheckResult[]> {
     const results = await Promise.all([
       this.pingSweep(switches),
       this.firmwareConsistency(switches),
@@ -165,7 +218,7 @@ export class HealthCheckEngine {
   // 1. Ping Sweep
   // -------------------------------------------------------------------------
 
-  async pingSweep(switches: DiscoveredSwitch[]): Promise<HealthCheckResult> {
+  async pingSweep(switches: HealthCheckSwitch[]): Promise<HealthCheckResult> {
     const details: HealthCheckDetail[] = [];
 
     for (const sw of switches) {
@@ -232,7 +285,7 @@ export class HealthCheckEngine {
   // 2. Firmware Consistency
   // -------------------------------------------------------------------------
 
-  async firmwareConsistency(switches: DiscoveredSwitch[]): Promise<HealthCheckResult> {
+  async firmwareConsistency(switches: HealthCheckSwitch[]): Promise<HealthCheckResult> {
     const details: HealthCheckDetail[] = [];
     const versions = new Set(switches.map((s) => s.firmware));
     const majorVersion = switches.length > 0 ? switches[0].firmware : '';
@@ -290,7 +343,7 @@ export class HealthCheckEngine {
   // 3. VLAN Consistency
   // -------------------------------------------------------------------------
 
-  async vlanConsistency(switches: DiscoveredSwitch[]): Promise<HealthCheckResult> {
+  async vlanConsistency(switches: HealthCheckSwitch[]): Promise<HealthCheckResult> {
     const details: HealthCheckDetail[] = [];
 
     // Group switches that share ISL/trunk links
@@ -371,7 +424,7 @@ export class HealthCheckEngine {
   // 4. IGMP Auditor
   // -------------------------------------------------------------------------
 
-  async igmpAuditor(switches: DiscoveredSwitch[]): Promise<HealthCheckResult> {
+  async igmpAuditor(switches: HealthCheckSwitch[]): Promise<HealthCheckResult> {
     const details: HealthCheckDetail[] = [];
 
     // Collect all multicast VLANs and their queriers
@@ -444,14 +497,14 @@ export class HealthCheckEngine {
   // 5. PoE Budget
   // -------------------------------------------------------------------------
 
-  async poeBudget(switches: DiscoveredSwitch[]): Promise<HealthCheckResult> {
+  async poeBudget(switches: HealthCheckSwitch[]): Promise<HealthCheckResult> {
     const details: HealthCheckDetail[] = [];
 
     for (const sw of switches) {
       if (!sw.poe) continue;
 
       const pct = (sw.poe.drawW / sw.poe.budgetW) * 100;
-      let status: HealthStatus = 'pass';
+      let status: CheckStatus = 'pass';
       if (pct >= 95) status = 'critical';
       else if (pct >= 85) status = 'fail';
       else if (pct >= 70) status = 'warning';
@@ -496,7 +549,7 @@ export class HealthCheckEngine {
   // 6. RLinkX Validation
   // -------------------------------------------------------------------------
 
-  async rlinkxValidation(switches: DiscoveredSwitch[]): Promise<HealthCheckResult> {
+  async rlinkxValidation(switches: HealthCheckSwitch[]): Promise<HealthCheckResult> {
     const details: HealthCheckDetail[] = [];
 
     for (const sw of switches) {
@@ -562,14 +615,14 @@ export class HealthCheckEngine {
   // 7. Port Error Check
   // -------------------------------------------------------------------------
 
-  async portErrorCheck(switches: DiscoveredSwitch[]): Promise<HealthCheckResult> {
+  async portErrorCheck(switches: HealthCheckSwitch[]): Promise<HealthCheckResult> {
     const details: HealthCheckDetail[] = [];
 
     for (const sw of switches) {
       for (const port of sw.ports) {
         if (!port.linkUp) continue;
 
-        let status: HealthStatus = 'pass';
+        let status: CheckStatus = 'pass';
         if (port.errorsPerMin >= 50) status = 'critical';
         else if (port.errorsPerMin >= 5) status = 'fail';
         else if (port.errorsPerMin > 0) status = 'warning';
@@ -614,7 +667,7 @@ export class HealthCheckEngine {
   // 8. Link Speed Audit
   // -------------------------------------------------------------------------
 
-  async linkSpeedAudit(switches: DiscoveredSwitch[]): Promise<HealthCheckResult> {
+  async linkSpeedAudit(switches: HealthCheckSwitch[]): Promise<HealthCheckResult> {
     const details: HealthCheckDetail[] = [];
 
     for (const sw of switches) {
@@ -664,7 +717,7 @@ export class HealthCheckEngine {
   // 9. Cable / SFP Check
   // -------------------------------------------------------------------------
 
-  async cableSfpCheck(switches: DiscoveredSwitch[]): Promise<HealthCheckResult> {
+  async cableSfpCheck(switches: HealthCheckSwitch[]): Promise<HealthCheckResult> {
     const details: HealthCheckDetail[] = [];
 
     for (const sw of switches) {
@@ -727,12 +780,12 @@ export class HealthCheckEngine {
   // 10. Temperature Check
   // -------------------------------------------------------------------------
 
-  async temperatureCheck(switches: DiscoveredSwitch[]): Promise<HealthCheckResult> {
+  async temperatureCheck(switches: HealthCheckSwitch[]): Promise<HealthCheckResult> {
     const details: HealthCheckDetail[] = [];
 
     for (const sw of switches) {
       const temp = sw.temperature ?? 35;
-      let status: HealthStatus = 'pass';
+      let status: CheckStatus = 'pass';
       if (temp > 60) status = 'critical';
       else if (temp > 50) status = 'fail';
       else if (temp > 40) status = 'warning';
@@ -766,7 +819,7 @@ export class HealthCheckEngine {
   // 11. Duplicate IP Check
   // -------------------------------------------------------------------------
 
-  async duplicateIpCheck(switches: DiscoveredSwitch[]): Promise<HealthCheckResult> {
+  async duplicateIpCheck(switches: HealthCheckSwitch[]): Promise<HealthCheckResult> {
     const details: HealthCheckDetail[] = [];
     const ipMap: Record<string, string[]> = {};
 

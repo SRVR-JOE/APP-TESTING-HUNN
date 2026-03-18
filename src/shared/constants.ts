@@ -21,7 +21,7 @@ export const GIGACORE_MDNS_SERVICE = '_gigacore._tcp';
 export const GIGACORE_BONJOUR_TYPE = 'gigacore';
 
 // Database
-export const DB_FILENAME = 'gigacore-command.db';
+export const DB_FILENAME = 'luminex-configurator.db';
 
 // Health check thresholds
 export const HEALTH_THRESHOLDS = {
@@ -38,6 +38,8 @@ export const VIEWS = {
   SCANNER: 'scanner',
   RACK_MAP: 'rackMap',
   TOPOLOGY: 'topology',
+  IGMP: 'igmp',
+  VLAN_CONFIG: 'vlanConfig',
   DEVICE_DETAIL: 'deviceDetail',
   DISCOVERED_DEVICES: 'discoveredDevices',
   BATCH_CONFIG: 'batchConfig',

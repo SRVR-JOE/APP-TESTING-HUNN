@@ -15,7 +15,16 @@ import {
   Radio,
 } from 'lucide-react';
 import VLANMembershipMatrix from '../components/VLANMembershipMatrix';
-import CreateVLANModal, { DiscoveredSwitch, NewVLANConfig } from '../components/CreateVLANModal';
+import CreateVLANModal, { type NewVLANConfig } from '../components/CreateVLANModal';
+import type { DiscoveredSwitch } from '@shared/types';
+
+/** Minimal switch info used for VLAN config mock data. */
+interface VLANSwitch {
+  name: string;
+  ip: string;
+  model: string;
+  portCount: number;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -83,7 +92,7 @@ const VLAN_COLORS: Record<number, string> = {
 /*  Mock switch data                                                   */
 /* ------------------------------------------------------------------ */
 
-const MOCK_SWITCHES: DiscoveredSwitch[] = [
+const MOCK_SWITCHES: VLANSwitch[] = [
   { name: 'GC-Core-01', ip: '10.0.1.1', model: 'GigaCore 30i', portCount: 30 },
   { name: 'GC-Core-02', ip: '10.0.1.2', model: 'GigaCore 30i', portCount: 30 },
   { name: 'GC-Stage-L', ip: '10.0.1.10', model: 'GigaCore 16Xt', portCount: 16 },
@@ -601,7 +610,7 @@ export default function VLANConfigView() {
       {/* Create VLAN Modal */}
       <CreateVLANModal
         existingVlans={vlans.map((v) => v.id)}
-        switches={MOCK_SWITCHES}
+        switches={MOCK_SWITCHES as unknown as DiscoveredSwitch[]}
         isOpen={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
         onCreate={handleCreateVlan}

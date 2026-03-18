@@ -17,7 +17,7 @@ import { VIEWS, type ViewId } from '@shared/constants';
 interface NavItem {
   id: ViewId;
   label: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
+  icon: React.ComponentType<any>;
 }
 
 const navItems: NavItem[] = [
@@ -41,7 +41,7 @@ export function Sidebar() {
     <aside className="w-56 bg-gc-dark border-r border-gray-700 flex flex-col">
       <div className="px-4 py-5 border-b border-gray-700">
         <h1 className="text-lg font-bold text-gc-accent tracking-wide">
-          GigaCore Command
+          Luminex Configurator
         </h1>
         <p className="text-xs text-gray-400 mt-0.5">Switch Management</p>
       </div>

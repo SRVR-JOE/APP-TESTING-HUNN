@@ -1,5 +1,5 @@
 // ============================================================================
-// GigaCore Command — WebSocket Client for Gen2 Real-Time Status
+// Luminex Configurator — WebSocket Client for Gen2 Real-Time Status
 // Provides auto-reconnecting WebSocket with topic-based subscriptions.
 // Runs in the Electron main process.
 // ============================================================================
@@ -130,6 +130,9 @@ export class GigaCoreWebSocket extends EventEmitter {
     this.emit('disconnected');
   }
 
+  /** Set of valid WebSocket subscription topics. */
+  private static readonly VALID_TOPICS = new Set(['ports', 'poe', 'system', 'groups', 'lldp']);
+
   /**
    * Subscribe to a real-time topic.
    * Valid topics: 'ports', 'poe', 'system', 'groups', 'lldp'.
@@ -137,6 +140,11 @@ export class GigaCoreWebSocket extends EventEmitter {
    * @returns An unsubscribe function. Call it to remove this specific callback.
    */
   subscribe(topic: string, callback: (data: any) => void): () => void {
+    if (!GigaCoreWebSocket.VALID_TOPICS.has(topic)) {
+      console.warn(`Invalid WebSocket topic: ${topic}`);
+      return () => {};
+    }
+
     if (!this.subscriptions.has(topic)) {
       this.subscriptions.set(topic, new Set());
     }

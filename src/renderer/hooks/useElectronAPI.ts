@@ -1,5 +1,55 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { SwitchInfo, DiscoveredDevice, ElectronAPI } from '../types';
+import type { PortInfo } from '../types';
+
+// ---------------------------------------------------------------------------
+// Renderer-specific mock types (not shared with main process)
+// ---------------------------------------------------------------------------
+
+/** Switch shape used exclusively by the renderer mock / discovery hooks. */
+export interface SwitchInfo {
+  id: string;
+  name: string;
+  model: string;
+  ip: string;
+  mac: string;
+  firmware: string;
+  status: 'healthy' | 'warning' | 'critical' | 'offline';
+  ports: PortInfo[];
+  poeBudgetWatts: number;
+  poeDrawWatts: number;
+  uptime?: string;
+  location?: string;
+  rackGroup?: string;
+  lastSeen: string;
+}
+
+/** Device shape used exclusively by the renderer mock / discovery hooks. */
+interface MockDiscoveredDevice {
+  id: string;
+  name: string;
+  hostname?: string;
+  ip: string;
+  mac: string;
+  manufacturer: string;
+  protocol: string;
+  connectedSwitch: string;
+  connectedPort: number;
+  status: 'online' | 'offline';
+  lastSeen: string;
+}
+
+/** Mock-only API surface used when running outside Electron. */
+interface MockElectronAPI {
+  scanSubnet: (subnet: string) => Promise<SwitchInfo[]>;
+  getSwitches: () => Promise<SwitchInfo[]>;
+  getDiscoveredDevices: () => Promise<MockDiscoveredDevice[]>;
+  pingSwitch: (ip: string) => Promise<{ alive: boolean; latency: number }>;
+  openWebUI: (ip: string) => void;
+  exportCSV: () => Promise<void>;
+  getLocalSubnets: () => Promise<string[]>;
+  onScanProgress: (cb: (progress: number) => void) => () => void;
+  onSwitchUpdate: () => () => void;
+}
 
 // ---------------------------------------------------------------------------
 // Mock data for development without Electron
@@ -133,7 +183,7 @@ const MOCK_SWITCHES: SwitchInfo[] = [
   },
 ];
 
-const MOCK_DEVICES: DiscoveredDevice[] = [
+const MOCK_DEVICES: MockDiscoveredDevice[] = [
   {
     id: 'dev-001',
     name: 'Dante-Stagebox-1',
@@ -244,7 +294,7 @@ const MOCK_SUBNETS = ['192.168.1.0/24', '10.0.0.0/24', '172.16.0.0/24'];
 // Mock API matching ElectronAPI interface
 // ---------------------------------------------------------------------------
 
-const mockAPI: ElectronAPI = {
+const mockAPI: MockElectronAPI = {
   scanSubnet: async (_subnet: string) => {
     await new Promise((r) => setTimeout(r, 2000));
     return MOCK_SWITCHES;
@@ -282,8 +332,8 @@ const mockAPI: ElectronAPI = {
 // Hooks
 // ---------------------------------------------------------------------------
 
-export function useElectronAPI(): ElectronAPI {
-  return window.electronAPI ?? mockAPI;
+export function useElectronAPI(): MockElectronAPI {
+  return (window.electronAPI as unknown as MockElectronAPI) ?? mockAPI;
 }
 
 export function useDiscovery() {
@@ -338,7 +388,7 @@ export function useDiscovery() {
 
 export function useDiscoveredDevices() {
   const api = useElectronAPI();
-  const [devices, setDevices] = useState<DiscoveredDevice[]>([]);
+  const [devices, setDevices] = useState<MockDiscoveredDevice[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
   const loadDevices = useCallback(async () => {
