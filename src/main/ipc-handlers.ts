@@ -10,7 +10,7 @@
 //   4. Return { success, data } or { success, error }
 //
 
-import { ipcMain, dialog } from 'electron';
+import { ipcMain, dialog, shell } from 'electron';
 import {
   databaseManager,
   switchRepo,
@@ -167,6 +167,63 @@ export function registerIpcHandlers(): void {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('[IPC] discovery:stopPolling error:', message);
+      return fail(message);
+    }
+  });
+
+  ipcMain.handle('discovery:getLocalSubnets', async () => {
+    console.log('[IPC] discovery:getLocalSubnets called');
+    try {
+      const localSubnets = subnetScanner.getLocalSubnets();
+      // Return just the CIDR strings, which is what the renderer expects
+      const cidrs = localSubnets.map((s) => s.cidr);
+      return ok(cidrs);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[IPC] discovery:getLocalSubnets error:', message);
+      return fail(message);
+    }
+  });
+
+  // ─── Utility ───────────────────────────────────────────────────────────────
+
+  ipcMain.handle('utility:openWebUI', async (_event, ip: string) => {
+    console.log(`[IPC] utility:openWebUI called: ${ip}`);
+    try {
+      if (!isNonEmptyString(ip)) {
+        return fail('ip must be a non-empty string');
+      }
+      const cleanIp = sanitize(ip);
+      if (!isValidHost(cleanIp)) {
+        return fail(`Invalid IP format: "${cleanIp}"`);
+      }
+      await shell.openExternal(`http://${cleanIp}`);
+      return ok(undefined);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[IPC] utility:openWebUI error:', message);
+      return fail(message);
+    }
+  });
+
+  ipcMain.handle('utility:exportCSV', async () => {
+    console.log('[IPC] utility:exportCSV called');
+    try {
+      const result = await dialog.showSaveDialog({
+        title: 'Export Event Log as CSV',
+        defaultPath: `luminex-event-log-${new Date().toISOString().slice(0, 10)}.csv`,
+        filters: [{ name: 'CSV Files', extensions: ['csv'] }],
+      });
+
+      if (result.canceled || !result.filePath) {
+        return ok(''); // User cancelled
+      }
+
+      await logExporter.exportToCSV({}, result.filePath);
+      return ok(result.filePath);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[IPC] utility:exportCSV error:', message);
       return fail(message);
     }
   });

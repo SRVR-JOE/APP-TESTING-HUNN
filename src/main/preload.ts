@@ -18,12 +18,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('discovery:scanSubnet', subnet),
   getDiscoveredSwitches: () =>
     ipcRenderer.invoke('discovery:getDiscoveredSwitches'),
+  // Alias used by the renderer hooks (useElectronAPI / ScannerView)
+  getSwitches: () =>
+    ipcRenderer.invoke('discovery:getDiscoveredSwitches'),
   getDiscoveredDevices: () =>
     ipcRenderer.invoke('discovery:getDiscoveredDevices'),
   startPolling: (intervalMs: number) =>
     ipcRenderer.invoke('discovery:startPolling', intervalMs),
   stopPolling: () =>
     ipcRenderer.invoke('discovery:stopPolling'),
+  getLocalSubnets: () =>
+    ipcRenderer.invoke('discovery:getLocalSubnets'),
 
   // Config
   applyProfile: (switchId: string, profileId: string) =>
@@ -68,10 +73,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('troubleshoot:runHealthChecks', switchIds),
   pingHost: (host: string) =>
     ipcRenderer.invoke('troubleshoot:pingHost', host),
+  // Alias used by the renderer hooks (useElectronAPI / ScannerView)
+  pingSwitch: (ip: string) =>
+    ipcRenderer.invoke('troubleshoot:pingHost', ip),
   compareSwitches: (switchIdA: string, switchIdB: string) =>
     ipcRenderer.invoke('troubleshoot:compareSwitches', switchIdA, switchIdB),
   resetCounters: (switchId: string) =>
     ipcRenderer.invoke('troubleshoot:resetCounters', switchId),
+
+  // Utility
+  openWebUI: (ip: string) =>
+    ipcRenderer.invoke('utility:openWebUI', ip),
+  exportCSV: () =>
+    ipcRenderer.invoke('utility:exportCSV'),
 
   // Events (main -> renderer)
   onSwitchDiscovered: createEventListener('event:switchDiscovered'),
@@ -79,4 +93,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onPortChange: createEventListener('event:portChange'),
   onHealthAlert: createEventListener('event:healthAlert'),
   onLogEvent: createEventListener('event:logEvent'),
+  onScanProgress: createEventListener<number>('event:scanProgress'),
+  onSwitchUpdate: createEventListener('event:switchUpdate'),
 });
