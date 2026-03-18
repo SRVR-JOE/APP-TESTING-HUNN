@@ -37,6 +37,7 @@ export const HEALTH_THRESHOLDS = {
 export const VIEWS = {
   SCANNER: 'scanner',
   RACK_MAP: 'rackMap',
+  TOPOLOGY: 'topology',
   DEVICE_DETAIL: 'deviceDetail',
   DISCOVERED_DEVICES: 'discoveredDevices',
   BATCH_CONFIG: 'batchConfig',
