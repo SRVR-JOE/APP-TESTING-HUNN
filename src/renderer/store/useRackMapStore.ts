@@ -48,6 +48,18 @@ export type OverlayMode = 'default' | 'poe' | 'health' | 'traffic' | 'vlan';
 
 // ─── State Interface ─────────────────────────────────────────────────────────
 
+export interface BackgroundImage {
+  dataUrl: string;           // base64 data URL of the image
+  fileName: string;          // original file name
+  width: number;             // natural width in px
+  height: number;            // natural height in px
+  opacity: number;           // 0–1 opacity
+  positionX: number;         // position on canvas
+  positionY: number;         // position on canvas
+  scale: number;             // display scale multiplier
+  locked: boolean;           // if true, cannot be dragged
+}
+
 export interface RackMapState {
   rackGroups: RackGroupData[];
   switchAssignments: Record<string, string>; // switchId → groupId
@@ -61,6 +73,7 @@ export interface RackMapState {
   layoutName: string;
   isDirty: boolean;
   sidebarOpen: boolean;
+  backgroundImage: BackgroundImage | null;
 
   // Actions
   addRackGroup: (name: string) => void;
@@ -76,6 +89,8 @@ export interface RackMapState {
   setSelectedGroup: (id: string | null) => void;
   setLayoutName: (name: string) => void;
   setSidebarOpen: (open: boolean) => void;
+  setBackgroundImage: (image: BackgroundImage | null) => void;
+  updateBackgroundImage: (updates: Partial<BackgroundImage>) => void;
   saveLayout: () => void;
   loadLayout: (layout: SavedLayout) => void;
   exportJSON: () => string;
@@ -85,6 +100,7 @@ export interface SavedLayout {
   layoutName: string;
   rackGroups: RackGroupData[];
   switchAssignments: Record<string, string>;
+  backgroundImage?: BackgroundImage | null;
 }
 
 // ─── Mock Data ───────────────────────────────────────────────────────────────
@@ -274,6 +290,7 @@ export const useRackMapStore = create<RackMapState>((set, get) => ({
   layoutName: 'Main Show Layout',
   isDirty: false,
   sidebarOpen: true,
+  backgroundImage: null,
 
   addRackGroup: (name: string) => {
     const id = `grp-${nextGroupId++}`;
@@ -358,12 +375,24 @@ export const useRackMapStore = create<RackMapState>((set, get) => ({
 
   setSidebarOpen: (open: boolean) => set({ sidebarOpen: open }),
 
+  setBackgroundImage: (image: BackgroundImage | null) => set({ backgroundImage: image, isDirty: true }),
+
+  updateBackgroundImage: (updates: Partial<BackgroundImage>) => {
+    set((state) => ({
+      backgroundImage: state.backgroundImage
+        ? { ...state.backgroundImage, ...updates }
+        : null,
+      isDirty: true,
+    }));
+  },
+
   saveLayout: () => {
     const state = get();
     const layout: SavedLayout = {
       layoutName: state.layoutName,
       rackGroups: state.rackGroups,
       switchAssignments: state.switchAssignments,
+      backgroundImage: state.backgroundImage,
     };
     try {
       localStorage.setItem('rackMapLayout', JSON.stringify(layout));
@@ -378,6 +407,7 @@ export const useRackMapStore = create<RackMapState>((set, get) => ({
       layoutName: layout.layoutName,
       rackGroups: layout.rackGroups,
       switchAssignments: layout.switchAssignments,
+      backgroundImage: layout.backgroundImage ?? null,
       isDirty: false,
     });
   },
@@ -390,6 +420,7 @@ export const useRackMapStore = create<RackMapState>((set, get) => ({
         rackGroups: state.rackGroups,
         switchAssignments: state.switchAssignments,
         islLinks: state.islLinks,
+        backgroundImage: state.backgroundImage,
         exportedAt: new Date().toISOString(),
       },
       null,

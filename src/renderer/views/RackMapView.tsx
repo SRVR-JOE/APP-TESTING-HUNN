@@ -17,11 +17,15 @@ import {
   Layers,
   GripVertical,
   X,
+  Image,
+  Lock,
+  Unlock,
+  Trash2,
 } from 'lucide-react';
 import RackGroup from '../components/RackGroup';
 import ISLLink from '../components/ISLLink';
 import { useRackMapStore } from '../store/useRackMapStore';
-import type { OverlayMode } from '../store/useRackMapStore';
+import type { OverlayMode, BackgroundImage } from '../store/useRackMapStore';
 import { useAppStore } from '../store/useAppStore';
 import { VIEWS } from '@shared/constants';
 
@@ -71,6 +75,9 @@ export default function RackMapView() {
     setSelectedGroup,
     setLayoutName,
     setSidebarOpen,
+    backgroundImage,
+    setBackgroundImage,
+    updateBackgroundImage,
     saveLayout,
     exportJSON,
   } = useRackMapStore();
@@ -89,6 +96,8 @@ export default function RackMapView() {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [groupHeights, setGroupHeights] = useState<Record<string, number>>({});
+  const [showBgControls, setShowBgControls] = useState(false);
+  const bgFileInputRef = useRef<HTMLInputElement>(null);
 
   // Track actual rendered heights of rack groups
   const groupRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -268,6 +277,61 @@ export default function RackMapView() {
     URL.revokeObjectURL(url);
   }, [exportJSON, layoutName]);
 
+  // ─── Background Image Import ───────────────────────────────────────────────
+
+  const handleBgFileSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const validTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml', 'application/pdf'];
+      if (!validTypes.includes(file.type)) {
+        alert('Unsupported file type. Use PNG, JPEG, WebP, SVG, or PDF.');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        const img = new window.Image();
+        img.onload = () => {
+          setBackgroundImage({
+            dataUrl,
+            fileName: file.name,
+            width: img.naturalWidth,
+            height: img.naturalHeight,
+            opacity: 0.3,
+            positionX: 0,
+            positionY: 0,
+            scale: 1,
+            locked: false,
+          });
+          setShowBgControls(true);
+        };
+        img.onerror = () => {
+          // For PDFs or SVGs that don't load as Image, set with defaults
+          setBackgroundImage({
+            dataUrl,
+            fileName: file.name,
+            width: 1920,
+            height: 1080,
+            opacity: 0.3,
+            positionX: 0,
+            positionY: 0,
+            scale: 1,
+            locked: false,
+          });
+          setShowBgControls(true);
+        };
+        img.src = dataUrl;
+      };
+      reader.readAsDataURL(file);
+      // Reset the input so the same file can be re-selected
+      e.target.value = '';
+    },
+    [setBackgroundImage]
+  );
+
   // ─── Switch Click Handler ───────────────────────────────────────────────────
 
   const handleSwitchClick = useCallback(
@@ -412,6 +476,35 @@ export default function RackMapView() {
 
         <div className="w-px h-6 bg-gray-700 mx-1" />
 
+        {/* Background image controls */}
+        <input
+          ref={bgFileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/svg+xml,application/pdf"
+          className="hidden"
+          onChange={handleBgFileSelect}
+        />
+        <button
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+            backgroundImage
+              ? 'bg-purple-600/30 text-purple-300 hover:bg-purple-600/50 border border-purple-500/30'
+              : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+          }`}
+          onClick={() => {
+            if (backgroundImage) {
+              setShowBgControls(!showBgControls);
+            } else {
+              bgFileInputRef.current?.click();
+            }
+          }}
+          title={backgroundImage ? 'Background image settings' : 'Import background image (stage plot, floor plan, etc.)'}
+        >
+          <Image size={14} />
+          {backgroundImage ? 'Background' : 'Add Background'}
+        </button>
+
+        <div className="w-px h-6 bg-gray-700 mx-1" />
+
         {/* Sidebar toggle */}
         <button
           className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
@@ -456,6 +549,34 @@ export default function RackMapView() {
             </defs>
             <rect width="100%" height="100%" fill="url(#grid-dots)" />
           </svg>
+
+          {/* Background image layer */}
+          {backgroundImage && (
+            <div
+              className="absolute pointer-events-none"
+              style={{
+                transform: `translate(${panX}px, ${panY}px) scale(${zoom})`,
+                transformOrigin: '0 0',
+              }}
+            >
+              <img
+                src={backgroundImage.dataUrl}
+                alt={backgroundImage.fileName}
+                className="block"
+                style={{
+                  position: 'absolute',
+                  left: backgroundImage.positionX,
+                  top: backgroundImage.positionY,
+                  width: backgroundImage.width * backgroundImage.scale,
+                  height: backgroundImage.height * backgroundImage.scale,
+                  opacity: backgroundImage.opacity,
+                  pointerEvents: backgroundImage.locked ? 'none' : 'auto',
+                  userSelect: 'none',
+                }}
+                draggable={false}
+              />
+            </div>
+          )}
 
           {/* ISL Links SVG overlay */}
           <svg
@@ -597,6 +718,112 @@ export default function RackMapView() {
           </div>
         )}
       </div>
+
+      {/* ─── Background Image Controls Panel ─────────────────────────────── */}
+      {showBgControls && backgroundImage && (
+        <div className="absolute top-14 right-4 z-40 bg-gray-800 border border-gray-600 rounded-xl shadow-2xl p-4 w-72">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Background Image</h3>
+            <button
+              className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
+              onClick={() => setShowBgControls(false)}
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          <div className="text-[10px] text-gray-500 mb-3 truncate" title={backgroundImage.fileName}>
+            {backgroundImage.fileName} ({backgroundImage.width}x{backgroundImage.height})
+          </div>
+
+          {/* Opacity slider */}
+          <div className="mb-3">
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs text-gray-400">Opacity</label>
+              <span className="text-xs text-gray-500 font-mono">{Math.round(backgroundImage.opacity * 100)}%</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(backgroundImage.opacity * 100)}
+              onChange={(e) => updateBackgroundImage({ opacity: Number(e.target.value) / 100 })}
+              className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+            />
+          </div>
+
+          {/* Scale slider */}
+          <div className="mb-3">
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs text-gray-400">Scale</label>
+              <span className="text-xs text-gray-500 font-mono">{Math.round(backgroundImage.scale * 100)}%</span>
+            </div>
+            <input
+              type="range"
+              min={10}
+              max={300}
+              value={Math.round(backgroundImage.scale * 100)}
+              onChange={(e) => updateBackgroundImage({ scale: Number(e.target.value) / 100 })}
+              className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+            />
+          </div>
+
+          {/* Position inputs */}
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <div>
+              <label className="text-[10px] text-gray-500 block mb-0.5">X Position</label>
+              <input
+                type="number"
+                value={backgroundImage.positionX}
+                onChange={(e) => updateBackgroundImage({ positionX: Number(e.target.value) })}
+                className="w-full bg-gray-900 border border-gray-600 rounded text-xs text-gray-300 px-2 py-1 font-mono outline-none focus:border-purple-500"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-gray-500 block mb-0.5">Y Position</label>
+              <input
+                type="number"
+                value={backgroundImage.positionY}
+                onChange={(e) => updateBackgroundImage({ positionY: Number(e.target.value) })}
+                className="w-full bg-gray-900 border border-gray-600 rounded text-xs text-gray-300 px-2 py-1 font-mono outline-none focus:border-purple-500"
+              />
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex items-center gap-2">
+            <button
+              className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg transition-colors ${
+                backgroundImage.locked
+                  ? 'bg-yellow-600/20 text-yellow-300 border border-yellow-500/30 hover:bg-yellow-600/30'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+              onClick={() => updateBackgroundImage({ locked: !backgroundImage.locked })}
+              title={backgroundImage.locked ? 'Unlock position' : 'Lock position'}
+            >
+              {backgroundImage.locked ? <Lock size={12} /> : <Unlock size={12} />}
+              {backgroundImage.locked ? 'Locked' : 'Lock'}
+            </button>
+            <button
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-gray-700 text-gray-300 hover:bg-gray-600 rounded-lg transition-colors"
+              onClick={() => bgFileInputRef.current?.click()}
+              title="Replace image"
+            >
+              <Image size={12} /> Replace
+            </button>
+            <button
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 border border-red-500/20 rounded-lg transition-colors"
+              onClick={() => {
+                setBackgroundImage(null);
+                setShowBgControls(false);
+              }}
+              title="Remove background"
+            >
+              <Trash2 size={12} /> Remove
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ─── Add Rack Group Dialog ────────────────────────────────────────── */}
       {showAddDialog && (
