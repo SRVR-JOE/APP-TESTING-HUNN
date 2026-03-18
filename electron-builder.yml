@@ -1,0 +1,27 @@
+appId: com.gigacore.command
+productName: GigaCore Command
+directories:
+  output: out
+  buildResources: resources
+files:
+  - dist/**/*
+  - package.json
+asar: true
+win:
+  target:
+    - nsis
+  icon: resources/icon.ico
+mac:
+  target:
+    - dmg
+  icon: resources/icon.icns
+  category: public.app-category.utilities
+linux:
+  target:
+    - AppImage
+    - deb
+  icon: resources/icon.png
+  category: Utility
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
