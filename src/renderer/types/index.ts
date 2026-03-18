@@ -2,6 +2,9 @@
 // GigaCore Command — Shared Type Definitions
 // ============================================================
 
+// Re-export shared types used by logging components
+export type { EventCategory, Severity, EventLogEntry, PortStats } from '../../shared/types';
+
 export interface PortInfo {
   port: number;
   label: string;
