@@ -37,8 +37,6 @@ const navItems: NavItem[] = [
   { id: VIEWS.DISCOVERED_DEVICES, label: 'Devices', icon: Users },
   { id: VIEWS.NAMING, label: 'Naming', icon: Type },
   { id: VIEWS.SHOW_FILE, label: 'Show Files', icon: Save },
-  { id: VIEWS.TOUR_MANAGER, label: 'Tour Manager', icon: MapPin },
-  { id: VIEWS.FLEET, label: 'Fleet', icon: Package },
   { id: VIEWS.BATCH_CONFIG, label: 'Batch Config', icon: Layers },
   { id: VIEWS.EXCEL_IMPORT, label: 'Excel Import', icon: FileSpreadsheet },
   { id: VIEWS.PROFILES, label: 'Profiles', icon: BookOpen },

@@ -205,7 +205,63 @@ export const useShowFileStore = create<ShowFileState>((set, get) => ({
     };
     set({ deployResult: pendingResult });
 
-    // Simulate deploying to each switch sequentially
+    // ---------------------------------------------------------------------------
+    // Try real IPC first, fall back to simulation
+    // ---------------------------------------------------------------------------
+    if (window.electronAPI?.deployShowFile) {
+      // Subscribe to per-switch progress events if available
+      let unsubProgress: (() => void) | undefined;
+      if (window.electronAPI.onDeployProgress) {
+        unsubProgress = window.electronAPI.onDeployProgress((progress) => {
+          set((state) => {
+            if (!state.deployResult) return {};
+            const updatedSwitches = state.deployResult.switches.map((sw) =>
+              sw.switchId === progress.switchId
+                ? { ...sw, status: progress.status, message: progress.message, duration: progress.duration }
+                : sw,
+            );
+            return { deployResult: { ...state.deployResult, switches: updatedSwitches } };
+          });
+        });
+      }
+
+      try {
+        const result = await window.electronAPI.deployShowFile(sf);
+        // Merge the pre-flight report from our local state into the result
+        const finalResult: DeployResult = {
+          ...result,
+          preFlightReport: report,
+        };
+        set({ deployResult: finalResult });
+
+        // Auto-save version on successful deploy
+        if (finalResult.overallStatus === 'success') {
+          get().saveVersion(showFileId, 'Deployed to switches');
+        }
+
+        return finalResult;
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Unknown deployment error';
+        const errorResult: DeployResult = {
+          ...pendingResult,
+          switches: switchStatuses.map((sw) => ({
+            ...sw,
+            status: sw.status === 'pending' ? 'failed' as DeployStatus : sw.status,
+            message: sw.status === 'pending' ? errorMessage : sw.message,
+          })),
+          overallStatus: 'failed',
+          rollbackAvailable: false,
+        };
+        set({ deployResult: errorResult });
+        return errorResult;
+      } finally {
+        unsubProgress?.();
+      }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Simulation fallback (dev mode / no Electron)
+    // ---------------------------------------------------------------------------
     for (let i = 0; i < sf.switches.length; i++) {
       await new Promise((resolve) => setTimeout(resolve, 600 + Math.random() * 800));
       const swCfg = sf.switches[i];

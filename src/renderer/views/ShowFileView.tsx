@@ -482,6 +482,28 @@ const DeployTab: React.FC<DeployTabProps> = ({
   const [deploying, setDeploying] = useState(false);
   const [preFlightRunning, setPreFlightRunning] = useState(false);
 
+  // Listen for real-time deploy progress events from the main process.
+  // The store already handles updating deployResult via onDeployProgress in
+  // the deploy action, but we also subscribe here to cover cases where the
+  // main process emits progress events outside of the deploy() call flow
+  // (e.g. long-running background deploys).
+  useEffect(() => {
+    if (!window.electronAPI?.onDeployProgress) return;
+    const unsub = window.electronAPI.onDeployProgress((progress) => {
+      const store = useShowFileStore.getState();
+      if (!store.deployResult) return;
+      const updatedSwitches = store.deployResult.switches.map((sw) =>
+        sw.switchId === progress.switchId
+          ? { ...sw, status: progress.status, message: progress.message, duration: progress.duration }
+          : sw,
+      );
+      useShowFileStore.setState({
+        deployResult: { ...store.deployResult, switches: updatedSwitches },
+      });
+    });
+    return unsub;
+  }, []);
+
   const handleRunPreFlight = useCallback(() => {
     if (!activeShowFile) return;
     setPreFlightRunning(true);
@@ -586,6 +608,9 @@ const DeployTab: React.FC<DeployTabProps> = ({
                   {deployResult.overallStatus === 'success' && (
                     <span className="text-xs text-emerald-400 font-medium">Deployed Successfully</span>
                   )}
+                  {deployResult.overallStatus === 'failed' && (
+                    <span className="text-xs text-red-400 font-medium">Deployment Failed</span>
+                  )}
                   {deployResult.overallStatus === 'rolled-back' && (
                     <span className="text-xs text-yellow-400 font-medium">Rolled Back</span>
                   )}
@@ -606,13 +631,25 @@ const DeployTab: React.FC<DeployTabProps> = ({
                   return (
                     <div key={sw.switchId} className="flex items-center gap-3 px-4 py-2.5">
                       {statusIcon(sw.status)}
-                      <div className="flex-1">
-                        <span className="text-sm text-gray-200">{swConfig?.name ?? sw.switchId}</span>
-                        <span className="text-xs text-gray-500 ml-2">{swConfig?.ip}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-200">{swConfig?.name ?? sw.switchId}</span>
+                          <span className="text-xs text-gray-500">{swConfig?.ip}</span>
+                        </div>
+                        {sw.message && sw.status === 'failed' && (
+                          <p className="text-xs text-red-400 mt-0.5 truncate" title={sw.message}>
+                            {sw.message}
+                          </p>
+                        )}
+                        {sw.message && sw.status !== 'failed' && (
+                          <p className="text-xs text-gray-500 mt-0.5 truncate" title={sw.message}>
+                            {sw.message}
+                          </p>
+                        )}
                       </div>
-                      <span className="text-xs text-gray-500 capitalize">{sw.status}</span>
-                      {sw.duration && (
-                        <span className="text-xs text-gray-600">{sw.duration}ms</span>
+                      <span className="text-xs text-gray-500 capitalize flex-shrink-0">{sw.status}</span>
+                      {sw.duration != null && (
+                        <span className="text-xs text-gray-600 flex-shrink-0">{sw.duration}ms</span>
                       )}
                     </div>
                   );

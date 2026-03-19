@@ -230,7 +230,175 @@ export default function BatchConfigView() {
     setPreviewData(null);
   }, []);
 
-  // ─── Simulated execution ──────────────────────────────────────────────
+  // ─── Batch operation type for IPC ────────────────────────────────────
+  interface BatchOperation {
+    switchIp: string;
+    operation: string;
+    params: any;
+  }
+
+  // ─── Build operations from tab-specific data ──────────────────────────
+
+  const buildOperationsForTab = useCallback(
+    (tabId: TabId, tabData?: any): BatchOperation[] => {
+      const ops: BatchOperation[] = [];
+
+      switch (tabId) {
+        case 'groups': {
+          const groups = tabData as GroupRow[] | undefined;
+          if (!groups) break;
+          for (const sw of selectedSwitches) {
+            for (const g of groups) {
+              ops.push({
+                switchIp: sw.ip,
+                operation: 'group.set',
+                params: {
+                  id: g.groupNumber,
+                  config: {
+                    name: g.name,
+                    vlanId: g.vlanId,
+                    color: g.color,
+                    igmpSnooping: g.igmpSnooping,
+                    igmpQuerier: g.igmpQuerier,
+                    unknownFlooding: g.igmpFlooding,
+                  },
+                },
+              });
+            }
+          }
+          break;
+        }
+        case 'ports': {
+          // Port tab uses hardcoded form values — parse port ranges from the UI
+          // tabData: { portRange: string, groupId: number }[]
+          const assignments = tabData as Array<{ portRange: string; groupId: number }> | undefined;
+          if (!assignments) {
+            // Fallback: use default values from the form
+            for (const sw of selectedSwitches) {
+              for (let p = 1; p <= 8; p++) {
+                ops.push({ switchIp: sw.ip, operation: 'port.setGroup', params: { port: p, groupId: 1 } });
+              }
+              for (let p = 9; p <= 16; p++) {
+                ops.push({ switchIp: sw.ip, operation: 'port.setGroup', params: { port: p, groupId: 2 } });
+              }
+            }
+          } else {
+            for (const sw of selectedSwitches) {
+              for (const a of assignments) {
+                const [start, end] = a.portRange.split('-').map(Number);
+                for (let p = start; p <= (end || start); p++) {
+                  ops.push({ switchIp: sw.ip, operation: 'port.setGroup', params: { port: p, groupId: a.groupId } });
+                }
+              }
+            }
+          }
+          break;
+        }
+        case 'igmp': {
+          // IGMP tab: tabData = { groupId: number, enabled: boolean }[]
+          const settings = tabData as Array<{ groupId: number; enabled: boolean }> | undefined;
+          if (!settings) {
+            // Fallback defaults from the form checkboxes
+            const groupNames = ['Control', 'Audio Primary', 'Audio Secondary', 'Video', 'Lighting', 'Intercom'];
+            for (const sw of selectedSwitches) {
+              groupNames.forEach((_, i) => {
+                ops.push({
+                  switchIp: sw.ip,
+                  operation: 'igmp.setSnooping',
+                  params: { groupId: i + 1, enabled: i !== 4 },
+                });
+              });
+            }
+          } else {
+            for (const sw of selectedSwitches) {
+              for (const s of settings) {
+                ops.push({
+                  switchIp: sw.ip,
+                  operation: 'igmp.setSnooping',
+                  params: { groupId: s.groupId, enabled: s.enabled },
+                });
+              }
+            }
+          }
+          break;
+        }
+        case 'poe': {
+          // PoE tab: tabData = { portRange: string, enabled: boolean }[]
+          const settings = tabData as Array<{ portRange: string; enabled: boolean }> | undefined;
+          if (!settings) {
+            // Fallback defaults from the form
+            for (const sw of selectedSwitches) {
+              for (let p = 1; p <= 8; p++) {
+                ops.push({ switchIp: sw.ip, operation: 'poe.setEnabled', params: { port: p, enabled: true } });
+              }
+            }
+          } else {
+            for (const sw of selectedSwitches) {
+              for (const s of settings) {
+                const [start, end] = s.portRange.split('-').map(Number);
+                for (let p = start; p <= (end || start); p++) {
+                  ops.push({ switchIp: sw.ip, operation: 'poe.setEnabled', params: { port: p, enabled: s.enabled } });
+                }
+              }
+            }
+          }
+          break;
+        }
+        case 'naming': {
+          const assignments = tabData as NamingAssignment[] | undefined;
+          if (!assignments) break;
+          // For naming, we need to find the matching switch IP for each assignment
+          for (const a of assignments) {
+            const sw = selectedSwitches.find((s) => s.id === a.switchId);
+            if (sw) {
+              ops.push({ switchIp: sw.ip, operation: 'system.setName', params: { name: a.newName } });
+            }
+          }
+          break;
+        }
+        case 'ip': {
+          const assignments = tabData as IPAssignment[] | undefined;
+          if (!assignments) break;
+          for (const a of assignments) {
+            const sw = selectedSwitches.find((s) => s.id === a.switchId);
+            if (sw) {
+              ops.push({
+                switchIp: sw.ip,
+                operation: 'ip.setConfig',
+                params: { config: { ip: a.newIp, subnet: '255.255.255.0', gateway: '', dhcp: false } },
+              });
+            }
+          }
+          break;
+        }
+        case 'profile': {
+          const slot = (tabData as number) || 1;
+          for (const sw of selectedSwitches) {
+            ops.push({ switchIp: sw.ip, operation: 'profile.recall', params: { slot } });
+          }
+          break;
+        }
+        case 'system': {
+          // System tab operations (reboot, factory reset) — handled inline
+          const action = tabData as 'reboot' | 'factoryReset' | undefined;
+          if (action === 'reboot') {
+            for (const sw of selectedSwitches) {
+              ops.push({ switchIp: sw.ip, operation: 'system.reboot', params: {} });
+            }
+          }
+          break;
+        }
+        // firmware is handled separately
+        default:
+          break;
+      }
+
+      return ops;
+    },
+    [selectedSwitches],
+  );
+
+  // ─── Simulated execution (fallback for dev mode) ────────────────────
 
   const simulateExecution = useCallback(() => {
     if (selectedSwitches.length === 0) return;
@@ -245,14 +413,11 @@ export default function BatchConfigView() {
     }));
     setBatchStatuses(statuses);
     setOverallProgress(0);
-    setExecutionLog([`[INFO] Starting batch operation on ${selectedSwitches.length} switches...`]);
+    setExecutionLog([`[INFO] Starting batch operation on ${selectedSwitches.length} switches... (simulation)`]);
 
     let currentIdx = 0;
-    let tickCount = 0;
 
     executionTimer.current = setInterval(() => {
-      tickCount++;
-
       setBatchStatuses((prev) => {
         const next = [...prev];
         if (currentIdx < next.length) {
@@ -273,7 +438,6 @@ export default function BatchConfigView() {
             }
 
             if (sw.progress >= 100) {
-              // Simulate occasional failure
               if (sw.switchName === 'Backup-01') {
                 sw.status = 'failed';
                 sw.error = 'Connection refused: switch offline';
@@ -295,7 +459,6 @@ export default function BatchConfigView() {
           }
         }
 
-        // Calculate overall progress
         const completed = next.filter(
           (s) => s.status === 'success' || s.status === 'failed' || s.status === 'skipped'
         ).length;
@@ -304,7 +467,6 @@ export default function BatchConfigView() {
         const pct = ((completed + inProgressPct / 100) / next.length) * 100;
         setOverallProgress(Math.min(pct, 100));
 
-        // Check if done
         if (currentIdx >= next.length && !next.some((s) => s.status === 'in-progress')) {
           if (executionTimer.current) {
             clearInterval(executionTimer.current);
@@ -325,7 +487,222 @@ export default function BatchConfigView() {
     }, 600);
   }, [selectedSwitches]);
 
+  // ─── Real execution via IPC ────────────────────────────────────────
+
+  const realExecution = useCallback(
+    async (tabId?: TabId, tabData?: any) => {
+      if (selectedSwitches.length === 0) return;
+
+      const api = (window as any).electronAPI;
+
+      // Fall back to simulation if batchExecute is not available (dev mode)
+      if (!api?.batchExecute) {
+        console.warn('[BatchConfig] electronAPI.batchExecute not available, falling back to simulation');
+        simulateExecution();
+        return;
+      }
+
+      const tab = tabId ?? activeTab;
+
+      // Handle firmware separately via firmware:upload IPC
+      // Note: Electron's File objects have a .path property that browser File objects lack.
+      // The FirmwareFileInfo carries the file name; we store the full path if available.
+      if (tab === 'firmware' && tabData) {
+        const { file, rebootAfter } = tabData as { file: FirmwareFileInfo & { path?: string }; rebootAfter: boolean };
+        const compatible = selectedSwitches.filter((s) =>
+          file.compatibleModels.includes(s.model)
+        );
+
+        if (compatible.length === 0) return;
+
+        // If we don't have a file path (e.g. browser mode), fall back to simulation
+        const filePath = file.path;
+        if (!filePath || !api.firmwareUpload) {
+          console.warn('[BatchConfig] No firmware file path or firmwareUpload API, falling back to simulation');
+          simulateExecution();
+          return;
+        }
+
+        setIsExecuting(true);
+        setPreviewReviewed(false);
+        const statuses: BatchSwitchStatus[] = compatible.map((sw) => ({
+          switchName: sw.name,
+          switchIp: sw.ip,
+          status: 'waiting',
+          progress: 0,
+        }));
+        setBatchStatuses(statuses);
+        setOverallProgress(0);
+        setExecutionLog([`[INFO] Starting firmware upload to ${compatible.length} switches...`]);
+
+        for (let i = 0; i < compatible.length; i++) {
+          const sw = compatible[i];
+          setBatchStatuses((prev) => {
+            const next = [...prev];
+            next[i] = { ...next[i], status: 'in-progress', progress: 10, currentOperation: 'Uploading firmware...' };
+            return next;
+          });
+          setExecutionLog((l) => [...l, `[INFO] Uploading firmware to ${sw.name} (${sw.ip})...`]);
+
+          try {
+            await api.firmwareUpload(sw.ip, filePath, rebootAfter);
+            setBatchStatuses((prev) => {
+              const next = [...prev];
+              next[i] = { ...next[i], status: 'success', progress: 100 };
+              return next;
+            });
+            setExecutionLog((l) => [...l, `[OK] ${sw.name} firmware uploaded successfully`]);
+          } catch (err: any) {
+            setBatchStatuses((prev) => {
+              const next = [...prev];
+              next[i] = { ...next[i], status: 'failed', progress: 100, error: err.message || String(err) };
+              return next;
+            });
+            setExecutionLog((l) => [...l, `[ERROR] ${sw.name}: ${err.message || String(err)}`]);
+          }
+
+          const pct = ((i + 1) / compatible.length) * 100;
+          setOverallProgress(pct);
+        }
+
+        setIsExecuting(false);
+        setOverallProgress(100);
+        return;
+      }
+
+      // Build operations array for the current tab
+      const operations = buildOperationsForTab(tab, tabData);
+
+      if (operations.length === 0) {
+        console.warn('[BatchConfig] No operations to execute for tab:', tab);
+        simulateExecution();
+        return;
+      }
+
+      // Initialize UI state
+      setIsExecuting(true);
+      setPreviewReviewed(false);
+      const statuses: BatchSwitchStatus[] = selectedSwitches.map((sw) => ({
+        switchName: sw.name,
+        switchIp: sw.ip,
+        status: 'waiting',
+        progress: 0,
+      }));
+      setBatchStatuses(statuses);
+      setOverallProgress(0);
+      setExecutionLog([`[INFO] Starting batch operation on ${selectedSwitches.length} switches (${operations.length} operations)...`]);
+
+      // Subscribe to progress events from the main process
+      let unsubProgress: (() => void) | null = null;
+      if (api.onBatchProgress) {
+        unsubProgress = api.onBatchProgress((data: {
+          switchIp: string;
+          status: 'waiting' | 'in-progress' | 'success' | 'failed' | 'skipped';
+          progress: number;
+          currentOperation?: string;
+          error?: string;
+          overallProgress: number;
+          total: number;
+          completed: number;
+          failed: number;
+        }) => {
+          setBatchStatuses((prev) => {
+            const next = [...prev];
+            const idx = next.findIndex((s) => s.switchIp === data.switchIp);
+            if (idx >= 0) {
+              next[idx] = {
+                ...next[idx],
+                status: data.status,
+                progress: data.status === 'success' || data.status === 'failed' ? 100 : Math.min(data.overallProgress, 95),
+                currentOperation: data.currentOperation,
+                error: data.error,
+              };
+            }
+            return next;
+          });
+
+          setOverallProgress(data.overallProgress);
+
+          if (data.status === 'success') {
+            const sw = selectedSwitches.find((s) => s.ip === data.switchIp);
+            setExecutionLog((l) => [...l, `[OK] ${sw?.name || data.switchIp} configured successfully`]);
+          } else if (data.status === 'failed') {
+            const sw = selectedSwitches.find((s) => s.ip === data.switchIp);
+            setExecutionLog((l) => [
+              ...l,
+              `[ERROR] Failed to configure ${sw?.name || data.switchIp}: ${data.error || 'Unknown error'}`,
+            ]);
+          } else if (data.status === 'in-progress') {
+            const sw = selectedSwitches.find((s) => s.ip === data.switchIp);
+            if (sw) {
+              // Only log the first in-progress event per switch
+              setBatchStatuses((prev) => {
+                const entry = prev.find((s) => s.switchIp === data.switchIp);
+                if (entry && entry.status === 'waiting') {
+                  setExecutionLog((l) => [...l, `[INFO] Connecting to ${sw.name} (${sw.ip})...`]);
+                }
+                return prev;
+              });
+            }
+          }
+        });
+      }
+
+      try {
+        const results = await api.batchExecute(operations);
+
+        // Final status update
+        const successCount = results.filter((r: any) => r.success).length;
+        const failCount = results.filter((r: any) => !r.success).length;
+        setExecutionLog((l) => [
+          ...l,
+          `[INFO] Batch operation complete: ${successCount} succeeded, ${failCount} failed`,
+        ]);
+
+        // Ensure final statuses are correct based on results
+        setBatchStatuses((prev) => {
+          const next = [...prev];
+          for (const s of next) {
+            const switchResults = results.filter((r: any) => r.switchIp === s.switchIp);
+            if (switchResults.length > 0) {
+              const anyFailed = switchResults.some((r: any) => !r.success);
+              s.status = anyFailed ? 'failed' : 'success';
+              s.progress = 100;
+              if (anyFailed) {
+                s.error = switchResults.find((r: any) => !r.success)?.error;
+              }
+            }
+          }
+          return next;
+        });
+        setOverallProgress(100);
+      } catch (err: any) {
+        setExecutionLog((l) => [...l, `[ERROR] Batch execution failed: ${err.message || String(err)}`]);
+        setBatchStatuses((prev) =>
+          prev.map((s) =>
+            s.status === 'waiting' || s.status === 'in-progress'
+              ? { ...s, status: 'failed', progress: 100, error: err.message || String(err) }
+              : s
+          )
+        );
+        setOverallProgress(100);
+      } finally {
+        setIsExecuting(false);
+        if (unsubProgress) unsubProgress();
+      }
+    },
+    [selectedSwitches, activeTab, buildOperationsForTab, simulateExecution],
+  );
+
+  // ─── Abort handler ─────────────────────────────────────────────────
+
   const handleAbort = useCallback(() => {
+    // Try to abort via IPC first
+    const api = (window as any).electronAPI;
+    if (api?.batchAbort) {
+      api.batchAbort().catch(() => {});
+    }
+
     if (executionTimer.current) {
       clearInterval(executionTimer.current);
       executionTimer.current = null;
@@ -344,7 +721,7 @@ export default function BatchConfigView() {
 
   const handleRollback = useCallback(() => {
     setExecutionLog((l) => [...l, '[INFO] Rollback initiated for failed switches...']);
-    // In a real app this would trigger rollback logic
+    // In a real app this would trigger rollback logic via IPC
     setTimeout(() => {
       setExecutionLog((l) => [...l, '[OK] Rollback complete']);
     }, 1000);
@@ -370,7 +747,7 @@ export default function BatchConfigView() {
   const renderGroupsTab = () => (
     <GroupConfigForm
       onPreview={(groups) => showPreview(buildGroupPreview(groups, selectedSwitches), 'Group/VLAN Configuration')}
-      onApply={() => simulateExecution()}
+      onApply={(groups) => realExecution('groups', groups)}
       previewReviewed={previewReviewed}
     />
   );
@@ -441,7 +818,7 @@ export default function BatchConfigView() {
           Preview Changes
         </button>
         <button
-          onClick={simulateExecution}
+          onClick={() => realExecution('ports')}
           disabled={!previewReviewed}
           className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
             previewReviewed ? 'bg-gc-accent text-white hover:bg-gc-accent/80' : 'bg-gray-700 text-gray-500 cursor-not-allowed'
@@ -507,7 +884,7 @@ export default function BatchConfigView() {
           Preview Changes
         </button>
         <button
-          onClick={simulateExecution}
+          onClick={() => realExecution('igmp')}
           disabled={!previewReviewed}
           className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
             previewReviewed ? 'bg-gc-accent text-white hover:bg-gc-accent/80' : 'bg-gray-700 text-gray-500 cursor-not-allowed'
@@ -567,7 +944,7 @@ export default function BatchConfigView() {
           Preview Changes
         </button>
         <button
-          onClick={simulateExecution}
+          onClick={() => realExecution('poe')}
           disabled={!previewReviewed}
           className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
             previewReviewed ? 'bg-gc-accent text-white hover:bg-gc-accent/80' : 'bg-gray-700 text-gray-500 cursor-not-allowed'
@@ -583,7 +960,7 @@ export default function BatchConfigView() {
     <SequentialNaming
       switches={selectedSwitches}
       onPreview={(assignments) => showPreview(buildNamingPreview(assignments), 'Sequential Naming')}
-      onApply={() => simulateExecution()}
+      onApply={(assignments) => realExecution('naming', assignments)}
       previewReviewed={previewReviewed}
     />
   );
@@ -592,7 +969,7 @@ export default function BatchConfigView() {
     <SequentialIP
       switches={selectedSwitches}
       onPreview={(assignments) => showPreview(buildIPPreview(assignments), 'IP Addressing')}
-      onApply={() => simulateExecution()}
+      onApply={(assignments) => realExecution('ip', assignments)}
       previewReviewed={previewReviewed}
     />
   );
@@ -651,7 +1028,7 @@ export default function BatchConfigView() {
           Preview Changes
         </button>
         <button
-          onClick={simulateExecution}
+          onClick={() => realExecution('profile', 1)}
           disabled={!previewReviewed}
           className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
             previewReviewed ? 'bg-gc-accent text-white hover:bg-gc-accent/80' : 'bg-gray-700 text-gray-500 cursor-not-allowed'
@@ -667,7 +1044,7 @@ export default function BatchConfigView() {
     <FirmwareUploader
       switches={selectedSwitches}
       onPreview={(file) => showPreview(buildFirmwarePreview(file, selectedSwitches), 'Firmware Update')}
-      onApply={() => simulateExecution()}
+      onApply={(file, rebootAfter) => realExecution('firmware', { file, rebootAfter })}
       previewReviewed={previewReviewed}
     />
   );

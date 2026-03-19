@@ -6,12 +6,23 @@ import {
   ChevronDown,
   Loader2,
   Server,
+  Plus,
+  X,
 } from 'lucide-react';
 import type { SwitchInfo, FilterDefinition, SortOption } from '../types';
 import { useDiscovery, useElectronAPI } from '../hooks/useElectronAPI';
 import { SwitchCard } from '../components/SwitchCard';
 import { SearchFilter } from '../components/SearchFilter';
 import { EmptyState } from '../components/EmptyState';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** GigaCore default subnets that are always available as options. */
+const GIGACORE_DEFAULT_SUBNETS = ['2.0.0.0/24', '192.168.0.0/24'];
+
+const CUSTOM_SUBNETS_STORAGE_KEY = 'luminex-custom-subnets';
 
 // ---------------------------------------------------------------------------
 // Filter & sort configuration
@@ -110,6 +121,34 @@ function compareSwitches(
   return dir === 'asc' ? cmp : -cmp;
 }
 
+/** Validate a CIDR string (e.g. 10.0.0.0/24). */
+function isValidCidr(val: string): boolean {
+  return /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(val.trim());
+}
+
+/** Load custom subnets from localStorage. */
+function loadCustomSubnets(): string[] {
+  try {
+    const raw = localStorage.getItem(CUSTOM_SUBNETS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.filter((s) => typeof s === 'string');
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+/** Save custom subnets to localStorage. */
+function saveCustomSubnets(subnets: string[]): void {
+  try {
+    localStorage.setItem(CUSTOM_SUBNETS_STORAGE_KEY, JSON.stringify(subnets));
+  } catch {
+    // ignore
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -120,6 +159,8 @@ export const ScannerView: React.FC = () => {
     switches,
     isScanning,
     scanProgress,
+    scanScanned,
+    scanTotal,
     lastScanTime,
     scan,
     startPolling,
@@ -127,9 +168,14 @@ export const ScannerView: React.FC = () => {
   } = useDiscovery();
 
   // Subnet selector
-  const [subnets, setSubnets] = useState<string[]>(['192.168.1.0/24']);
-  const [selectedSubnet, setSelectedSubnet] = useState('192.168.1.0/24');
+  const [detectedSubnets, setDetectedSubnets] = useState<string[]>([]);
+  const [customSubnets, setCustomSubnets] = useState<string[]>(loadCustomSubnets);
+  const [selectedSubnet, setSelectedSubnet] = useState('2.0.0.0/24');
   const [subnetDropdownOpen, setSubnetDropdownOpen] = useState(false);
+
+  // Custom subnet input
+  const [customSubnetInput, setCustomSubnetInput] = useState('');
+  const [customSubnetError, setCustomSubnetError] = useState('');
 
   // Auto-refresh
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -143,12 +189,24 @@ export const ScannerView: React.FC = () => {
   // Selected switch
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  // Refreshing switch details
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
+
+  // Build the merged list of all subnets (defaults + detected + custom), deduplicated
+  const allSubnets = useMemo(() => {
+    const set = new Set<string>([
+      ...GIGACORE_DEFAULT_SUBNETS,
+      ...detectedSubnets,
+      ...customSubnets,
+    ]);
+    return Array.from(set);
+  }, [detectedSubnets, customSubnets]);
+
   // Detect subnets on mount
   useEffect(() => {
     api.getLocalSubnets().then((subs: string[]) => {
       if (subs.length > 0) {
-        setSubnets(subs);
-        setSelectedSubnet(subs[0]);
+        setDetectedSubnets(subs);
       }
     });
   }, [api]);
@@ -199,7 +257,6 @@ export const ScannerView: React.FC = () => {
   const handlePing = useCallback(
     async (ip: string) => {
       const result = await api.pingSwitch(ip);
-      // In a real app, show a toast notification
       console.log(`Ping ${ip}: ${result.alive ? `OK (${result.latency}ms)` : 'FAILED'}`);
     },
     [api],
@@ -210,6 +267,61 @@ export const ScannerView: React.FC = () => {
       api.openWebUI(ip);
     },
     [api],
+  );
+
+  const handleRefreshDetails = useCallback(
+    async (switchId: string) => {
+      setRefreshingId(switchId);
+      try {
+        const details = await api.getSwitchDetails(switchId);
+        if (details) {
+          console.log(`[ScannerView] Refreshed details for ${switchId}:`, details);
+          // Details fetched successfully -- in a full implementation this would
+          // update the switch in state with the fresh port/group data.
+        }
+      } catch (err) {
+        console.error(`[ScannerView] Failed to refresh details for ${switchId}:`, err);
+      } finally {
+        setRefreshingId(null);
+      }
+    },
+    [api],
+  );
+
+  const handleAddCustomSubnet = useCallback(() => {
+    const trimmed = customSubnetInput.trim();
+    if (!trimmed) {
+      setCustomSubnetError('Enter a CIDR range');
+      return;
+    }
+    if (!isValidCidr(trimmed)) {
+      setCustomSubnetError('Invalid CIDR format (e.g. 10.0.0.0/24)');
+      return;
+    }
+    if (allSubnets.includes(trimmed)) {
+      setCustomSubnetError('Subnet already in the list');
+      return;
+    }
+    const updated = [...customSubnets, trimmed];
+    setCustomSubnets(updated);
+    saveCustomSubnets(updated);
+    setCustomSubnetInput('');
+    setCustomSubnetError('');
+    setSelectedSubnet(trimmed);
+  }, [customSubnetInput, customSubnets, allSubnets]);
+
+  const handleRemoveCustomSubnet = useCallback(
+    (subnet: string) => {
+      const updated = customSubnets.filter((s) => s !== subnet);
+      setCustomSubnets(updated);
+      saveCustomSubnets(updated);
+      // If the removed subnet was selected, switch to the first available
+      if (selectedSubnet === subnet) {
+        const remaining = allSubnets.filter((s) => s !== subnet);
+        setSelectedSubnet(remaining[0] ?? '2.0.0.0/24');
+      }
+    },
+    [customSubnets, selectedSubnet, allSubnets],
   );
 
   const formatTime = (d: Date | null) => {
@@ -232,23 +344,79 @@ export const ScannerView: React.FC = () => {
               <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
             </button>
             {subnetDropdownOpen && (
-              <div className="absolute top-full left-0 mt-1 min-w-[180px] bg-gray-800 border border-gray-700 rounded-md shadow-lg z-50 py-1">
-                {subnets.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => {
-                      setSelectedSubnet(s);
-                      setSubnetDropdownOpen(false);
-                    }}
-                    className={`w-full text-left px-3 py-1.5 text-sm font-mono transition-colors ${
-                      s === selectedSubnet
-                        ? 'bg-blue-600/20 text-blue-300'
-                        : 'text-gray-300 hover:bg-gray-700'
-                    }`}
-                  >
-                    {s}
-                  </button>
-                ))}
+              <div className="absolute top-full left-0 mt-1 min-w-[260px] bg-gray-800 border border-gray-700 rounded-md shadow-lg z-50 py-1">
+                {/* GigaCore defaults & detected subnets */}
+                {allSubnets.map((s) => {
+                  const isCustom = customSubnets.includes(s);
+                  const isDefault = GIGACORE_DEFAULT_SUBNETS.includes(s);
+                  return (
+                    <div key={s} className="flex items-center group">
+                      <button
+                        onClick={() => {
+                          setSelectedSubnet(s);
+                          setSubnetDropdownOpen(false);
+                        }}
+                        className={`flex-1 text-left px-3 py-1.5 text-sm font-mono transition-colors ${
+                          s === selectedSubnet
+                            ? 'bg-blue-600/20 text-blue-300'
+                            : 'text-gray-300 hover:bg-gray-700'
+                        }`}
+                      >
+                        {s}
+                        {isDefault && (
+                          <span className="ml-2 text-[10px] text-gray-500 font-sans">(GigaCore)</span>
+                        )}
+                        {isCustom && !isDefault && (
+                          <span className="ml-2 text-[10px] text-gray-500 font-sans">(custom)</span>
+                        )}
+                      </button>
+                      {isCustom && !isDefault && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveCustomSubnet(s);
+                          }}
+                          className="px-2 py-1.5 text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Remove custom subnet"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Divider + custom subnet input */}
+                <div className="border-t border-gray-700 mt-1 pt-1 px-2 pb-1">
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      value={customSubnetInput}
+                      onChange={(e) => {
+                        setCustomSubnetInput(e.target.value);
+                        setCustomSubnetError('');
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddCustomSubnet();
+                        }
+                      }}
+                      placeholder="10.0.0.0/24"
+                      className="flex-1 px-2 py-1 text-sm font-mono bg-gray-900 border border-gray-600 rounded text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 min-w-0"
+                    />
+                    <button
+                      onClick={handleAddCustomSubnet}
+                      className="p-1 bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors"
+                      title="Add custom subnet"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {customSubnetError && (
+                    <p className="text-xs text-red-400 mt-1">{customSubnetError}</p>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -304,11 +472,24 @@ export const ScannerView: React.FC = () => {
 
         {/* Progress bar during scan */}
         {isScanning && (
-          <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-blue-500 rounded-full transition-all duration-300"
-              style={{ width: `${scanProgress}%` }}
-            />
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-xs text-gray-400">
+              <span>
+                {scanTotal > 0
+                  ? `Scanning ${scanScanned} of ${scanTotal} hosts...`
+                  : 'Starting scan...'}
+              </span>
+              <span className="font-mono">{scanProgress}%</span>
+            </div>
+            <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                style={{ width: `${scanProgress}%` }}
+              />
+            </div>
+            <p className="text-xs text-gray-500">
+              Subnet: <span className="font-mono text-gray-400">{selectedSubnet}</span>
+            </p>
           </div>
         )}
 
@@ -374,6 +555,8 @@ export const ScannerView: React.FC = () => {
                 onSelect={setSelectedId}
                 onPing={handlePing}
                 onOpenWebUI={handleOpenWebUI}
+                onRefreshDetails={handleRefreshDetails}
+                isRefreshing={refreshingId === sw.id}
               />
             ))}
           </div>

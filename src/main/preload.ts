@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     invoke('discovery:getDiscoveredDevices'),
   getLocalSubnets: () =>
     invoke('discovery:getLocalSubnets'),
+  getSwitchDetails: (switchId: string) =>
+    invoke('discovery:getSwitchDetails', switchId),
   startPolling: (intervalMs: number) =>
     invoke('discovery:startPolling', intervalMs),
   stopPolling: () =>
@@ -102,12 +104,45 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resetCounters: (switchId: string) =>
     invoke('troubleshoot:resetCounters', switchId),
 
+  // Batch Operations
+  batchExecute: (operations: unknown[], options?: unknown) =>
+    invoke('batch:execute', operations, options),
+  batchAbort: () =>
+    invoke('batch:abort'),
+
+  // Deploy Show File
+  deployShowFile: (showFileConfig: unknown) =>
+    invoke('deploy:showFile', showFileConfig),
+
+  // Firmware Upload
+  uploadFirmware: (payload: { switchId: string; firmwarePath: string }) =>
+    invoke('config:uploadFirmware', payload),
+
+  // Discovery — extended
+  addCustomSubnet: (subnet: string) =>
+    invoke('discovery:addCustomSubnet', subnet),
+
   // Events (main -> renderer)
   onSwitchDiscovered: createEventListener('event:switchDiscovered'),
   onSwitchLost: createEventListener('event:switchLost'),
   onSwitchUpdate: createEventListener('event:switchUpdate'),
-  onScanProgress: createEventListener<number>('event:scanProgress'),
+  onScanProgress: createEventListener<{ scanned: number; total: number }>('event:scanProgress'),
   onPortChange: createEventListener('event:portChange'),
   onHealthAlert: createEventListener('event:healthAlert'),
   onLogEvent: createEventListener('event:logEvent'),
+  onBatchProgress: createEventListener<{
+    total: number;
+    completed: number;
+    failed: number;
+    current: string;
+  }>('batch:progress'),
+  onDeployProgress: createEventListener<{
+    switchId: string;
+    status: string;
+    message: string;
+  }>('deploy:progress'),
+  onFirmwareProgress: createEventListener<{
+    switchId: string;
+    percent: number;
+  }>('firmware:progress'),
 });

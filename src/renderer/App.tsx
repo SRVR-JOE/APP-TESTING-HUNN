@@ -20,8 +20,6 @@ import TroubleshootView from './views/TroubleshootView';
 import SettingsView from './views/SettingsView';
 import NamingView from './views/NamingView';
 import { ShowFileView } from './views/ShowFileView';
-import TourManagerView from './views/TourManagerView';
-import FleetView from './views/FleetView';
 import MulticastFlowView from './views/MulticastFlowView';
 import RedundancyView from './views/RedundancyView';
 import AuditTrailView from './views/AuditTrailView';
@@ -42,8 +40,6 @@ const viewComponents: Record<string, React.ComponentType> = {
   [VIEWS.PROFILES]: ProfilesView,
   [VIEWS.NAMING]: NamingView,
   [VIEWS.SHOW_FILE]: ShowFileView,
-  [VIEWS.TOUR_MANAGER]: TourManagerView,
-  [VIEWS.FLEET]: FleetView,
   [VIEWS.MULTICAST_FLOW]: MulticastFlowView,
   [VIEWS.REDUNDANCY]: RedundancyView,
   [VIEWS.AUDIT_TRAIL]: AuditTrailView,

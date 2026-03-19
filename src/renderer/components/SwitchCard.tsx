@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Eye, Activity, Globe } from 'lucide-react';
+import { Eye, Activity, Globe, RefreshCw, Loader2 } from 'lucide-react';
 import type { SwitchInfo } from '../types';
 import { HealthIndicator } from './HealthIndicator';
 import { PoEBar } from './PoEBar';
@@ -11,6 +11,8 @@ interface SwitchCardProps {
   onSelect?: (id: string) => void;
   onPing?: (ip: string) => void;
   onOpenWebUI?: (ip: string) => void;
+  onRefreshDetails?: (switchId: string) => void;
+  isRefreshing?: boolean;
 }
 
 const modelColors: Record<string, { bg: string; text: string; border: string }> = {
@@ -34,6 +36,8 @@ export const SwitchCard: React.FC<SwitchCardProps> = ({
   onSelect,
   onPing,
   onOpenWebUI,
+  onRefreshDetails,
+  isRefreshing = false,
 }) => {
   const [hovered, setHovered] = useState(false);
   const modelStyle = getModelStyle(switchInfo.model);
@@ -128,6 +132,21 @@ export const SwitchCard: React.FC<SwitchCardProps> = ({
           ${hovered ? 'opacity-100' : 'opacity-0'}
         `}
       >
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onRefreshDetails?.(switchInfo.id);
+          }}
+          disabled={isRefreshing}
+          className="p-1.5 bg-gray-700 hover:bg-green-600 text-gray-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
+          title="Refresh Details"
+        >
+          {isRefreshing ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="w-3.5 h-3.5" />
+          )}
+        </button>
         <button
           onClick={(e) => {
             e.stopPropagation();

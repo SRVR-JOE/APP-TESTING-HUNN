@@ -343,12 +343,16 @@ export interface ElectronAPI {
   compareSwitches: (switchIdA: string, switchIdB: string) => Promise<Record<string, unknown>>;
   resetCounters: (switchId: string) => Promise<void>;
 
+  // Show File Deploy
+  deployShowFile: (showFile: ShowFile) => Promise<DeployResult>;
+
   // Events (callbacks)
   onSwitchDiscovered: (callback: (sw: DiscoveredSwitch) => void) => () => void;
   onSwitchLost: (callback: (switchId: string) => void) => () => void;
   onPortChange: (callback: (data: { switchMac: string; port: number; linkUp: boolean }) => void) => () => void;
   onHealthAlert: (callback: (result: HealthCheckResult) => void) => () => void;
   onLogEvent: (callback: (entry: EventLogEntry) => void) => () => void;
+  onDeployProgress: (callback: (progress: DeployProgressEvent) => void) => () => void;
 }
 
 declare global {
@@ -504,6 +508,14 @@ export interface DeployResult {
   overallStatus: DeployStatus;
   preFlightReport: PreFlightReport;
   rollbackAvailable: boolean;
+}
+
+/** Progress event emitted per-switch during deployment (main -> renderer). */
+export interface DeployProgressEvent {
+  switchId: string;
+  status: DeployStatus;
+  message?: string;
+  duration?: number;
 }
 
 // ---- Drift Detection --------------------------------------------------------

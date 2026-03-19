@@ -38,6 +38,12 @@ interface MockDiscoveredDevice {
   lastSeen: string;
 }
 
+/** Scan progress payload from the main process. */
+export interface ScanProgressPayload {
+  scanned: number;
+  total: number;
+}
+
 /** Mock-only API surface used when running outside Electron. */
 interface MockElectronAPI {
   scanSubnet: (subnet: string) => Promise<SwitchInfo[]>;
@@ -47,7 +53,8 @@ interface MockElectronAPI {
   openWebUI: (ip: string) => void;
   exportCSV: () => Promise<void>;
   getLocalSubnets: () => Promise<string[]>;
-  onScanProgress: (cb: (progress: number) => void) => () => void;
+  getSwitchDetails: (switchId: string) => Promise<any>;
+  onScanProgress: (cb: (progress: ScanProgressPayload) => void) => () => void;
   onSwitchUpdate: () => () => void;
 }
 
@@ -312,13 +319,35 @@ const mockAPI: MockElectronAPI = {
     // no-op in dev
   },
   getLocalSubnets: async () => MOCK_SUBNETS,
-  onScanProgress: (cb: (progress: number) => void) => {
-    let p = 0;
+  getSwitchDetails: async (switchId: string) => {
+    // Return mock details based on the switchId
+    await new Promise((r) => setTimeout(r, 500));
+    const sw = MOCK_SWITCHES.find((s) => s.id === switchId);
+    if (!sw) return null;
+    return {
+      id: sw.id,
+      name: sw.name,
+      model: sw.model,
+      ip: sw.ip,
+      mac: sw.mac,
+      firmware: sw.firmware,
+      ports: sw.ports,
+      groups: [],
+      temperature: Math.floor(Math.random() * 20) + 30,
+      uptime: sw.uptime,
+      poe: sw.poeBudgetWatts > 0
+        ? { budgetW: sw.poeBudgetWatts, drawW: sw.poeDrawWatts }
+        : undefined,
+    };
+  },
+  onScanProgress: (cb: (progress: ScanProgressPayload) => void) => {
+    let scanned = 0;
+    const total = 254;
     const id = setInterval(() => {
-      p += Math.random() * 15;
-      if (p > 100) p = 100;
-      cb(p);
-      if (p >= 100) clearInterval(id);
+      scanned += Math.floor(Math.random() * 40) + 5;
+      if (scanned > total) scanned = total;
+      cb({ scanned, total });
+      if (scanned >= total) clearInterval(id);
     }, 300);
     return () => clearInterval(id);
   },
@@ -341,6 +370,8 @@ export function useDiscovery() {
   const [switches, setSwitches] = useState<SwitchInfo[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
+  const [scanScanned, setScanScanned] = useState(0);
+  const [scanTotal, setScanTotal] = useState(0);
   const [lastScanTime, setLastScanTime] = useState<Date | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -348,7 +379,14 @@ export function useDiscovery() {
     async (subnet: string) => {
       setIsScanning(true);
       setScanProgress(0);
-      const unsub = api.onScanProgress((p) => setScanProgress(p));
+      setScanScanned(0);
+      setScanTotal(0);
+      const unsub = api.onScanProgress((p) => {
+        const { scanned, total } = p;
+        setScanScanned(scanned);
+        setScanTotal(total);
+        setScanProgress(total > 0 ? Math.round((scanned / total) * 100) : 0);
+      });
       try {
         const result = await api.scanSubnet(subnet);
         setSwitches(result);
@@ -383,7 +421,17 @@ export function useDiscovery() {
     return () => stopPolling();
   }, [stopPolling]);
 
-  return { switches, isScanning, scanProgress, lastScanTime, scan, startPolling, stopPolling };
+  return {
+    switches,
+    isScanning,
+    scanProgress,
+    scanScanned,
+    scanTotal,
+    lastScanTime,
+    scan,
+    startPolling,
+    stopPolling,
+  };
 }
 
 export function useDiscoveredDevices() {

@@ -27,7 +27,7 @@ import { TemplateGenerator } from './excel/template-generator';
 import { HealthCheckEngine } from './troubleshoot/health-checks';
 import { PingTool } from './troubleshoot/ping-tool';
 import { QuickCompare } from './troubleshoot/quick-compare';
-import { GigaCoreClient } from './api';
+import { GigaCoreClient, BatchExecutor } from './api';
 import type { LogFilters } from '../shared/types';
 import type { RackLayoutData } from './database/rack-map-repository';
 import type { ShowProfile } from './database/profile-repository';
@@ -42,6 +42,14 @@ const templateGenerator = new TemplateGenerator();
 const healthCheckEngine = new HealthCheckEngine();
 const pingTool = new PingTool();
 const quickCompare = new QuickCompare();
+
+// ── Module-level state ──────────────────────────────────────────────────────
+
+/** Active batch executor reference — stored so that batch:abort can cancel it. */
+let activeBatchExecutor: BatchExecutor | null = null;
+
+/** Custom subnets added by the user for discovery scans. */
+const customSubnets: string[] = [];
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -567,9 +575,73 @@ export function registerIpcHandlers(): void {
           return fail('profileId must be a non-empty string');
         }
 
-        return fail(
-          'Profile application is not yet implemented. The deploy engine requires GigaCore API write access.',
-        );
+        // Find the switch
+        const liveSwitches = discoveryManager.getSwitches();
+        const sw = liveSwitches.find((s) => s.id === switchId) ?? switchRepo.getSwitchById(switchId);
+        if (!sw) {
+          return fail(`Switch "${switchId}" not found. Run a scan first.`);
+        }
+
+        const client = new GigaCoreClient(sw.ip, {
+          generation: sw.generation,
+        });
+
+        // Look up the profile from the database
+        const profile = profileRepo.getProfile(sanitize(profileId));
+
+        if (profile && profile.configJson) {
+          // Profile has detailed config — apply groups, ports, IGMP individually
+          const config = profile.configJson as Record<string, unknown>;
+
+          if (Array.isArray(config.groups)) {
+            for (const group of config.groups) {
+              await client.setGroup(group.id, {
+                name: group.name,
+                vlanId: group.vlanId,
+                color: group.color,
+                igmpSnooping: group.igmpSnooping,
+                igmpQuerier: group.igmpQuerier,
+                unknownFlooding: group.unknownFlooding,
+              });
+            }
+          }
+
+          if (Array.isArray(config.ports)) {
+            for (const port of config.ports) {
+              if (port.groupId !== undefined) {
+                await client.setPortGroup(port.port, port.groupId);
+              }
+              if (port.label) {
+                await client.setPortLabel(port.port, port.label);
+              }
+            }
+          }
+
+          if (Array.isArray(config.igmp)) {
+            for (const igmpEntry of config.igmp) {
+              if (igmpEntry.snooping !== undefined) {
+                await client.setIgmpSnooping(igmpEntry.groupId, igmpEntry.snooping);
+              }
+              if (igmpEntry.querier !== undefined) {
+                await client.setIgmpQuerier(igmpEntry.groupId, igmpEntry.querier);
+              }
+            }
+          }
+        } else {
+          // No detailed config — treat profileId as a numeric profile slot and recall it
+          const slot = parseInt(profileId, 10);
+          if (isNaN(slot) || slot < 0) {
+            return fail(`Profile "${profileId}" not found in database and is not a valid slot number.`);
+          }
+          await client.recallProfile(slot);
+        }
+
+        eventLogger.log('config', 'info', `Profile "${profileId}" applied to switch ${sw.name || sw.ip}`, {
+          switchMac: sw.mac,
+          switchName: sw.name,
+        });
+
+        return ok({ applied: true, switchId, profileId });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error('[IPC] config:applyProfile error:', message);
@@ -724,6 +796,321 @@ export function registerIpcHandlers(): void {
     },
   );
 
+  // ─── Batch Operations ─────────────────────────────────────────────────────
+
+  ipcMain.handle('batch:execute', async (event, operations: unknown[], options?: unknown) => {
+    console.log(`[IPC] batch:execute called with ${Array.isArray(operations) ? operations.length : 0} operations`);
+    try {
+      if (!Array.isArray(operations)) {
+        return fail('operations must be an array');
+      }
+      if (operations.length === 0) {
+        return fail('operations array must not be empty');
+      }
+
+      // Validate each operation has required fields
+      for (let i = 0; i < operations.length; i++) {
+        const op = operations[i] as Record<string, unknown>;
+        if (!op || typeof op !== 'object') {
+          return fail(`Operation at index ${i} must be an object`);
+        }
+        if (!isNonEmptyString(op.switchIp)) {
+          return fail(`Operation at index ${i} must have a non-empty switchIp string`);
+        }
+        if (!isNonEmptyString(op.operation)) {
+          return fail(`Operation at index ${i} must have a non-empty operation string`);
+        }
+      }
+
+      // Create the executor and store it so abort can reference it
+      const executor = new BatchExecutor({ concurrency: 2 });
+      activeBatchExecutor = executor;
+
+      const onProgress = (progress: { total: number; completed: number; failed: number; current: string }) => {
+        try {
+          event.sender.send('batch:progress', progress);
+        } catch {
+          // Renderer may have been destroyed
+        }
+      };
+
+      const results = await executor.execute(
+        operations as { switchIp: string; operation: string; params: Record<string, unknown> }[],
+        {
+          backupFirst: true,
+          stopOnError: false,
+          onProgress,
+        },
+      );
+
+      activeBatchExecutor = null;
+
+      eventLogger.log('config', 'info', `Batch execution completed: ${results.filter((r) => r.success).length}/${results.length} succeeded`);
+
+      return ok(results);
+    } catch (err) {
+      activeBatchExecutor = null;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[IPC] batch:execute error:', message);
+      return fail(message);
+    }
+  });
+
+  ipcMain.handle('batch:abort', async () => {
+    console.log('[IPC] batch:abort called');
+    try {
+      if (!activeBatchExecutor) {
+        return fail('No batch operation is currently running');
+      }
+
+      activeBatchExecutor.abort();
+      eventLogger.log('config', 'warning', 'Batch operation aborted by user');
+      return ok({ aborted: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[IPC] batch:abort error:', message);
+      return fail(message);
+    }
+  });
+
+  // ─── Deploy Show File ─────────────────────────────────────────────────────
+
+  ipcMain.handle('deploy:showFile', async (event, showFileConfig: unknown) => {
+    console.log('[IPC] deploy:showFile called');
+    try {
+      if (!showFileConfig || typeof showFileConfig !== 'object') {
+        return fail('showFileConfig must be a valid object');
+      }
+
+      const config = showFileConfig as Record<string, unknown>;
+      if (!Array.isArray(config.switches)) {
+        return fail('showFileConfig.switches must be an array');
+      }
+
+      const switches = config.switches as Record<string, unknown>[];
+      if (switches.length === 0) {
+        return fail('showFileConfig.switches must not be empty');
+      }
+
+      const liveSwitches = discoveryManager.getSwitches();
+      const results: Array<{ switchId: string; success: boolean; error?: string }> = [];
+      const backups: Array<{ switchId: string; backup: unknown }> = [];
+
+      for (let i = 0; i < switches.length; i++) {
+        const swConfig = switches[i];
+        const switchId = String(swConfig.id || swConfig.mac || '');
+
+        try {
+          event.sender.send('deploy:progress', {
+            switchId,
+            status: 'starting',
+            message: `Deploying switch ${i + 1} of ${switches.length}`,
+          });
+
+          // Find the live switch by ID or MAC
+          const sw = liveSwitches.find(
+            (s) => s.id === switchId || s.mac === switchId,
+          ) ?? switchRepo.getSwitchById(switchId);
+
+          if (!sw) {
+            results.push({ switchId, success: false, error: `Switch "${switchId}" not found` });
+            event.sender.send('deploy:progress', {
+              switchId,
+              status: 'error',
+              message: `Switch "${switchId}" not found`,
+            });
+            continue;
+          }
+
+          const client = new GigaCoreClient(sw.ip, {
+            generation: sw.generation,
+          });
+
+          // Backup current config before modifying
+          event.sender.send('deploy:progress', { switchId, status: 'backup', message: 'Backing up current config' });
+          const [backupSysInfo, backupPorts, backupGroups] = await Promise.all([
+            client.getSystemInfo(),
+            client.getPorts(),
+            client.getGroups(),
+          ]);
+          backups.push({
+            switchId,
+            backup: {
+              system: backupSysInfo,
+              ports: backupPorts,
+              groups: backupGroups,
+            },
+          });
+
+          // 1. Set system name
+          if (isNonEmptyString(swConfig.name)) {
+            event.sender.send('deploy:progress', { switchId, status: 'configuring', message: 'Setting system name' });
+            await client.setSystemName(swConfig.name as string);
+          }
+
+          // 2. Set IP configuration
+          if (swConfig.ipConfig && typeof swConfig.ipConfig === 'object') {
+            event.sender.send('deploy:progress', { switchId, status: 'configuring', message: 'Setting IP config' });
+            await client.setIpConfig(swConfig.ipConfig as Record<string, unknown>);
+          }
+
+          // 3. Configure groups
+          if (Array.isArray(swConfig.groups)) {
+            event.sender.send('deploy:progress', { switchId, status: 'configuring', message: 'Configuring groups' });
+            for (const group of swConfig.groups as Record<string, unknown>[]) {
+              await client.setGroup(group.id as number, {
+                name: group.name as string,
+                vlanId: group.vlanId as number,
+                color: group.color as string,
+                igmpSnooping: group.igmpSnooping as boolean,
+                igmpQuerier: group.igmpQuerier as boolean,
+                unknownFlooding: group.unknownFlooding as boolean,
+              });
+            }
+          }
+
+          // 4. Configure ports
+          if (Array.isArray(swConfig.ports)) {
+            event.sender.send('deploy:progress', { switchId, status: 'configuring', message: 'Configuring ports' });
+            for (const port of swConfig.ports as Record<string, unknown>[]) {
+              if (port.groupId !== undefined) {
+                await client.setPortGroup(port.port as number, port.groupId as number);
+              }
+            }
+          }
+
+          // 5. Configure IGMP
+          if (Array.isArray(swConfig.igmp)) {
+            event.sender.send('deploy:progress', { switchId, status: 'configuring', message: 'Configuring IGMP' });
+            for (const igmpEntry of swConfig.igmp as Record<string, unknown>[]) {
+              if (igmpEntry.snooping !== undefined) {
+                await client.setIgmpSnooping(igmpEntry.groupId as number, igmpEntry.snooping as boolean);
+              }
+              if (igmpEntry.querier !== undefined) {
+                await client.setIgmpQuerier(igmpEntry.groupId as number, igmpEntry.querier as boolean);
+              }
+            }
+          }
+
+          // 6. Configure PoE
+          if (Array.isArray(swConfig.poe)) {
+            event.sender.send('deploy:progress', { switchId, status: 'configuring', message: 'Configuring PoE' });
+            for (const poeEntry of swConfig.poe as Record<string, unknown>[]) {
+              await client.setPortPoe(poeEntry.port as number, poeEntry.enabled as boolean);
+            }
+          }
+
+          results.push({ switchId, success: true });
+          event.sender.send('deploy:progress', { switchId, status: 'complete', message: 'Deployment complete' });
+
+          eventLogger.log('config', 'info', `Show file deployed to switch ${sw.name || sw.ip}`, {
+            switchMac: sw.mac,
+            switchName: sw.name,
+          });
+        } catch (swErr) {
+          const swMessage = swErr instanceof Error ? swErr.message : String(swErr);
+          results.push({ switchId, success: false, error: swMessage });
+          event.sender.send('deploy:progress', { switchId, status: 'error', message: swMessage });
+          console.error(`[IPC] deploy:showFile error for switch ${switchId}:`, swMessage);
+        }
+      }
+
+      return ok({ results, backups });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[IPC] deploy:showFile error:', message);
+      return fail(message);
+    }
+  });
+
+  // ─── Firmware Upload ──────────────────────────────────────────────────────
+
+  ipcMain.handle('config:uploadFirmware', async (event, payload: unknown) => {
+    console.log('[IPC] config:uploadFirmware called');
+    try {
+      if (!payload || typeof payload !== 'object') {
+        return fail('payload must be an object with switchId and firmwarePath');
+      }
+
+      const { switchId, firmwarePath } = payload as Record<string, unknown>;
+
+      if (!isNonEmptyString(switchId)) {
+        return fail('switchId must be a non-empty string');
+      }
+      if (!isNonEmptyString(firmwarePath)) {
+        return fail('firmwarePath must be a non-empty string');
+      }
+
+      const cleanPath = sanitize(firmwarePath as string);
+
+      // Verify the firmware file exists
+      if (!fs.existsSync(cleanPath)) {
+        return fail(`Firmware file not found: "${cleanPath}"`);
+      }
+
+      // Find the switch
+      const liveSwitches = discoveryManager.getSwitches();
+      const sw = liveSwitches.find((s) => s.id === switchId) ?? switchRepo.getSwitchById(switchId as string);
+      if (!sw) {
+        return fail(`Switch "${switchId}" not found. Run a scan first.`);
+      }
+
+      const client = new GigaCoreClient(sw.ip, {
+        generation: sw.generation,
+      });
+
+      // Read firmware file
+      const firmwareBuffer = fs.readFileSync(cleanPath);
+
+      const onProgress = (percent: number) => {
+        try {
+          event.sender.send('firmware:progress', { switchId, percent });
+        } catch {
+          // Renderer may have been destroyed
+        }
+      };
+
+      await client.uploadFirmware(firmwareBuffer, onProgress);
+
+      eventLogger.log('config', 'info', `Firmware uploaded to switch ${sw.name || sw.ip}`, {
+        switchMac: sw.mac,
+        switchName: sw.name,
+      });
+
+      return ok({ success: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[IPC] config:uploadFirmware error:', message);
+      return fail(message);
+    }
+  });
+
+  // ─── Custom Subnet Discovery ──────────────────────────────────────────────
+
+  ipcMain.handle('discovery:addCustomSubnet', async (_event, subnet: string) => {
+    console.log(`[IPC] discovery:addCustomSubnet called: ${subnet}`);
+    try {
+      if (!isNonEmptyString(subnet)) {
+        return fail('subnet must be a non-empty string');
+      }
+      const cleaned = sanitize(subnet);
+      if (!isValidIpOrCidr(cleaned)) {
+        return fail(`Invalid subnet format: "${cleaned}". Expected CIDR notation like 192.168.1.0/24`);
+      }
+
+      // Avoid duplicates
+      if (!customSubnets.includes(cleaned)) {
+        customSubnets.push(cleaned);
+      }
+
+      return ok({ subnets: [...customSubnets] });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[IPC] discovery:addCustomSubnet error:', message);
+      return fail(message);
+    }
+  });
+
   // ─── Rack Map (stubs — data model ready, UI persistence pending) ────────────
 
   ipcMain.handle('rackMap:getRackGroups', async () => {
@@ -850,9 +1237,74 @@ export function registerIpcHandlers(): void {
     }
   });
 
+  // ─── Switch Details ─────────────────────────────────────────────────────────
+
+  ipcMain.handle('discovery:getSwitchDetails', async (_event, switchId: string) => {
+    console.log(`[IPC] discovery:getSwitchDetails called: ${switchId}`);
+    try {
+      if (!isNonEmptyString(switchId)) {
+        return fail('switchId must be a non-empty string');
+      }
+
+      const cleanId = sanitize(switchId);
+
+      // Find the switch in memory or DB
+      const liveSwitches = discoveryManager.getSwitches();
+      const sw = liveSwitches.find((s) => s.id === cleanId || s.ip === cleanId)
+        ?? switchRepo.getSwitchById(cleanId);
+      if (!sw) {
+        return fail(`Switch "${cleanId}" not found. Run a scan first.`);
+      }
+
+      // Fetch live port, group, PoE, and IGMP data from the switch via GigaCore API
+      const client = new GigaCoreClient(sw.ip, { generation: sw.generation });
+
+      const [systemInfo, ports, groups, poeSummary, igmpConfig] = await Promise.all([
+        client.getSystemInfo(),
+        client.getPorts(),
+        client.getGroups(),
+        client.getPoeSummary().catch(() => null),
+        client.getIgmpConfig().catch(() => null),
+      ]);
+
+      return ok({
+        id: sw.id,
+        name: systemInfo.name,
+        model: systemInfo.model,
+        ip: sw.ip,
+        mac: systemInfo.mac,
+        firmware: systemInfo.firmware,
+        serial: systemInfo.serial,
+        generation: systemInfo.generation,
+        ports,
+        groups,
+        poe: poeSummary,
+        igmp: igmpConfig,
+        temperature: sw.temperature,
+        uptime: sw.uptime,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[IPC] discovery:getSwitchDetails error:', message);
+      return fail(message);
+    }
+  });
+
   // ─── Discovery manager event forwarding ─────────────────────────────────────
   // Forward discovery events to the renderer process via IPC. The preload
   // exposes these as onSwitchDiscovered, onSwitchLost, etc.
+
+  // Forward scan progress to all renderer windows
+  discoveryManager.on('scan:progress', (scanned: number, total: number) => {
+    try {
+      const { BrowserWindow } = require('electron');
+      BrowserWindow.getAllWindows().forEach((win: Electron.BrowserWindow) => {
+        win.webContents.send('event:scanProgress', { scanned, total });
+      });
+    } catch (err) {
+      console.error('[IPC] Error forwarding scan:progress event:', err);
+    }
+  });
 
   discoveryManager.on('switch:found', (sw) => {
     try {
