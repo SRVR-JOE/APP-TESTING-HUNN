@@ -197,6 +197,28 @@ export class GigaCoreClient {
     }
   }
 
+  /**
+   * Persist the running configuration to non-volatile storage.
+   * Without this call, configuration changes are lost on power cycle.
+   *
+   * This is a critical operation — uses retry with exponential backoff.
+   */
+  async saveConfig(): Promise<void> {
+    if (this.generation === 2) {
+      await this.withRetry(
+        () => this.gen2Post('/api/system/save'),
+        3,
+        1000,
+      );
+    } else {
+      await this.withRetry(
+        () => this.gen1Command('save_config'),
+        3,
+        1000,
+      );
+    }
+  }
+
   // =========================================================================
   // Ports
   // =========================================================================

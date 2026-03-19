@@ -23,6 +23,7 @@ import {
   GitCompare,
   ArrowDownToLine,
   Eye,
+  ScanLine,
 } from 'lucide-react';
 import type {
   ShowFile,
@@ -33,6 +34,7 @@ import type {
   DeployStatus,
 } from '@shared/types';
 import { useShowFileStore, type ShowFileState } from '../store/useShowFileStore';
+import { useAppStore } from '../store/useAppStore';
 import { PreFlightPanel } from '../components/PreFlightPanel';
 import { ShowFileDiffViewer } from '../components/ShowFileDiffViewer';
 
@@ -231,12 +233,16 @@ export const ShowFileView: React.FC = () => {
           <DeployTab
             showFiles={showFiles}
             activeShowFile={activeShowFile}
+            activeShowFileId={activeShowFileId}
             preFlightReport={preFlightReport}
             deployResult={deployResult}
+            driftReport={driftReport}
             onSelect={loadShowFile}
             onRunPreFlight={runPreFlight}
             onDeploy={deploy}
             onRollback={rollback}
+            onCheckDrift={checkDrift}
+            onSwitchTab={setActiveTab}
           />
         )}
         {activeTab === 'versions' && (
@@ -343,6 +349,35 @@ const LibraryTab: React.FC<LibraryTabProps> = ({
     onCreate('New Show File', [sw], MOCK_VLANS.slice(0, 2));
   };
 
+  const [scanCreated, setScanCreated] = useState(false);
+  const discoveredSwitches = useAppStore((state) => state.switches);
+
+  const handleCreateFromScan = () => {
+    const switches = discoveredSwitches;
+    if (switches.length === 0) return;
+
+    const switchConfigs: ShowFileSwitchConfig[] = switches.map((sw) => ({
+      switchId: sw.id,
+      mac: sw.mac,
+      name: sw.name,
+      ip: sw.ip,
+      portConfigs: (sw.ports ?? []).map((p) => ({
+        port: p.port,
+        label: p.label,
+        vlan: p.vlans?.[0] ?? 1,
+        taggedVlans: p.isTrunk ? p.vlans : undefined,
+        poeEnabled: p.poeEnabled ?? false,
+        enabled: p.linkUp,
+      })),
+      vlans: [],
+      groups: sw.groups ?? [],
+    }));
+
+    onCreate('Show - ' + new Date().toLocaleDateString(), switchConfigs, []);
+    setScanCreated(true);
+    setTimeout(() => setScanCreated(false), 3000);
+  };
+
   return (
     <div className="space-y-4">
       {/* Toolbar */}
@@ -365,6 +400,14 @@ const LibraryTab: React.FC<LibraryTabProps> = ({
           New
         </button>
         <button
+          onClick={handleCreateFromScan}
+          disabled={discoveredSwitches.length === 0}
+          className="flex items-center gap-1.5 px-3 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 text-gray-200 rounded-lg text-sm font-medium transition-colors"
+        >
+          <ScanLine className="w-4 h-4" />
+          Create from Scan
+        </button>
+        <button
           onClick={handleImportClick}
           className="flex items-center gap-1.5 px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg text-sm font-medium transition-colors"
         >
@@ -373,6 +416,14 @@ const LibraryTab: React.FC<LibraryTabProps> = ({
         </button>
         <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleFileChange} />
       </div>
+
+      {/* Scan created banner */}
+      {scanCreated && (
+        <div className="flex items-center gap-2 p-3 bg-emerald-900/30 border border-emerald-700 rounded-lg text-sm text-emerald-300">
+          <CheckCircle className="w-4 h-4 flex-shrink-0" />
+          Show file created from discovered switches
+        </div>
+      )}
 
       {/* Grid */}
       {filtered.length === 0 ? (
@@ -461,23 +512,31 @@ const LibraryTab: React.FC<LibraryTabProps> = ({
 interface DeployTabProps {
   showFiles: ShowFile[];
   activeShowFile: ShowFile | null;
+  activeShowFileId: string | null;
   preFlightReport: ReturnType<typeof useShowFileStore.getState>['preFlightReport'];
   deployResult: ReturnType<typeof useShowFileStore.getState>['deployResult'];
+  driftReport: ReturnType<typeof useShowFileStore.getState>['driftReport'];
   onSelect: (id: string) => void;
   onRunPreFlight: (id: string) => void;
   onDeploy: (id: string) => Promise<any>;
   onRollback: (id: string) => void;
+  onCheckDrift: (id: string) => void;
+  onSwitchTab: (tab: Tab) => void;
 }
 
 const DeployTab: React.FC<DeployTabProps> = ({
   showFiles,
   activeShowFile,
+  activeShowFileId,
   preFlightReport,
   deployResult,
+  driftReport,
   onSelect,
   onRunPreFlight,
   onDeploy,
   onRollback,
+  onCheckDrift,
+  onSwitchTab,
 }) => {
   const [deploying, setDeploying] = useState(false);
   const [preFlightRunning, setPreFlightRunning] = useState(false);
@@ -503,6 +562,25 @@ const DeployTab: React.FC<DeployTabProps> = ({
     });
     return unsub;
   }, []);
+
+  const [verifying, setVerifying] = useState(false);
+  const [verified, setVerified] = useState(false);
+
+  // Auto-verify after successful deploy
+  useEffect(() => {
+    if (deployResult?.overallStatus === 'success' && activeShowFileId && !verified) {
+      setVerifying(true);
+      const timer = setTimeout(() => {
+        onCheckDrift(activeShowFileId);
+        setVerifying(false);
+        setVerified(true);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+    if (deployResult?.overallStatus !== 'success') {
+      setVerified(false);
+    }
+  }, [deployResult?.overallStatus, activeShowFileId, onCheckDrift, verified]);
 
   const handleRunPreFlight = useCallback(() => {
     if (!activeShowFile) return;
@@ -656,6 +734,33 @@ const DeployTab: React.FC<DeployTabProps> = ({
                 })}
               </div>
             </div>
+          )}
+
+          {/* Post-deploy verification */}
+          {deployResult?.overallStatus === 'success' && verifying && (
+            <div className="flex items-center gap-2 p-3 bg-gray-800/40 border border-gray-700 rounded-lg text-sm text-gray-400">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Verifying configuration against show file...
+            </div>
+          )}
+          {deployResult?.overallStatus === 'success' && verified && driftReport && (
+            driftReport.totalDrifts === 0 ? (
+              <div className="flex items-center gap-2 p-3 bg-emerald-900/30 border border-emerald-700 rounded-lg text-sm text-emerald-300">
+                <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                All switches verified — config matches show file
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 p-3 bg-yellow-900/30 border border-yellow-700 rounded-lg text-sm text-yellow-300">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                <span>{driftReport.totalDrifts} mismatch{driftReport.totalDrifts !== 1 ? 'es' : ''} detected</span>
+                <button
+                  onClick={() => onSwitchTab('drift')}
+                  className="ml-auto text-xs underline hover:text-yellow-200 transition-colors"
+                >
+                  View in Drift tab
+                </button>
+              </div>
+            )
           )}
         </>
       )}

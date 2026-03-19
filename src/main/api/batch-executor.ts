@@ -311,6 +311,32 @@ export class BatchExecutor extends EventEmitter {
 
     try {
       await Promise.all(promises);
+
+      // Persist configuration on each switch that had at least one successful
+      // write operation.  Group by switchIp so we save once per switch, not
+      // once per operation.
+      const switchesWithSuccess = new Set(
+        this.results
+          .filter((r) => r.success)
+          .map((r) => r.switchIp),
+      );
+
+      for (const switchIp of switchesWithSuccess) {
+        try {
+          this._progress.current = `Saving config on ${switchIp}`;
+          this.emitProgress(options?.onProgress);
+
+          const client = this.getClient(switchIp);
+          await client.saveConfig();
+        } catch (err) {
+          // saveConfig failure is non-fatal — the running config is still
+          // active in memory.  Log a warning so callers are aware.
+          this.emit('warning', {
+            switchIp,
+            message: `Failed to persist configuration: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        }
+      }
     } finally {
       this._isRunning = false;
       this._progress.current = '';

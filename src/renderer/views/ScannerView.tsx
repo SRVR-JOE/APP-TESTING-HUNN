@@ -9,8 +9,11 @@ import {
   Plus,
   X,
 } from 'lucide-react';
-import type { SwitchInfo, FilterDefinition, SortOption } from '../types';
+import type { FilterDefinition, SortOption, PortInfo } from '../types';
 import { useDiscovery, useElectronAPI } from '../hooks/useElectronAPI';
+import type { SwitchInfo } from '../hooks/useElectronAPI';
+import { useAppStore } from '../store/useAppStore';
+import { VIEWS } from '@shared/constants';
 import { SwitchCard } from '../components/SwitchCard';
 import { SearchFilter } from '../components/SearchFilter';
 import { EmptyState } from '../components/EmptyState';
@@ -157,6 +160,7 @@ export const ScannerView: React.FC = () => {
   const api = useElectronAPI();
   const {
     switches,
+    setSwitches,
     isScanning,
     scanProgress,
     scanScanned,
@@ -166,6 +170,8 @@ export const ScannerView: React.FC = () => {
     startPolling,
     stopPolling,
   } = useDiscovery();
+
+  const setView = useAppStore((s) => s.setView);
 
   // Subnet selector
   const [detectedSubnets, setDetectedSubnets] = useState<string[]>([]);
@@ -223,7 +229,7 @@ export const ScannerView: React.FC = () => {
 
   // Derive rack groups from switches for filter
   const rackGroups = useMemo(() => {
-    const groups = new Set(switches.map((s) => s.rackGroup).filter(Boolean));
+    const groups = new Set(normalizedSwitches.map((s) => s.rackGroup).filter(Boolean));
     return Array.from(groups).map((g) => ({ value: g!, label: g! }));
   }, [switches]);
 
@@ -237,17 +243,24 @@ export const ScannerView: React.FC = () => {
     [rackGroups],
   );
 
+  // Normalize switches so ports is always an array (guards against real
+  // discovery returning switches without port data).
+  const normalizedSwitches = useMemo(
+    () => switches.map(sw => ({ ...sw, ports: sw.ports ?? [] })),
+    [switches],
+  );
+
   // Filtered & sorted switches
   const filteredSwitches = useMemo(() => {
-    return switches
+    return normalizedSwitches
       .filter((sw) => matchesSearch(sw, searchQuery))
       .filter((sw) => matchesFilters(sw, activeFilters))
       .sort((a, b) => compareSwitches(a, b, sortField, sortDir));
-  }, [switches, searchQuery, activeFilters, sortField, sortDir]);
+  }, [normalizedSwitches, searchQuery, activeFilters, sortField, sortDir]);
 
   const totalDevices = useMemo(
-    () => switches.reduce((acc: number, sw: SwitchInfo) => acc + sw.ports.filter((p: import('../types').PortInfo) => p.operStatus === 'up').length, 0),
-    [switches],
+    () => normalizedSwitches.reduce((acc, sw) => acc + sw.ports.filter((p) => p.operStatus === 'up').length, 0),
+    [normalizedSwitches],
   );
 
   const handleScan = useCallback(() => {
@@ -275,9 +288,21 @@ export const ScannerView: React.FC = () => {
       try {
         const details = await api.getSwitchDetails(switchId);
         if (details) {
-          console.log(`[ScannerView] Refreshed details for ${switchId}:`, details);
-          // Details fetched successfully -- in a full implementation this would
-          // update the switch in state with the fresh port/group data.
+          // Update the switch in our local state with enriched data
+          setSwitches(prev => prev.map(sw =>
+            sw.id === switchId
+              ? {
+                  ...sw,
+                  ...details,
+                  ports: details.ports ?? sw.ports,
+                  // Map enriched PoE data back to the flat fields SwitchCard expects
+                  poeBudgetWatts: details.poe?.budgetW ?? sw.poeBudgetWatts,
+                  poeDrawWatts: details.poe?.drawW ?? sw.poeDrawWatts,
+                  status: sw.status,
+                  lastSeen: sw.lastSeen,
+                }
+              : sw
+          ));
         }
       } catch (err) {
         console.error(`[ScannerView] Failed to refresh details for ${switchId}:`, err);
@@ -285,7 +310,7 @@ export const ScannerView: React.FC = () => {
         setRefreshingId(null);
       }
     },
-    [api],
+    [api, setSwitches],
   );
 
   const handleAddCustomSubnet = useCallback(() => {
@@ -527,6 +552,21 @@ export const ScannerView: React.FC = () => {
               {formatTime(lastScanTime)}
             </span>
           </span>
+        </div>
+      )}
+
+      {/* ---- Next-step prompt ---- */}
+      {!isScanning && switches.length > 0 && (
+        <div className="flex-shrink-0 mx-4 mt-2 flex items-center gap-3 px-4 py-2 bg-gc-blue/10 border border-gc-blue/20 rounded-lg text-sm">
+          <span className="text-gray-300">
+            {switches.length} switch{switches.length !== 1 ? 'es' : ''} found.
+          </span>
+          <button onClick={() => setView(VIEWS.NAMING)} className="text-gc-accent hover:underline">
+            Name switches →
+          </button>
+          <button onClick={() => setView(VIEWS.BATCH_CONFIG)} className="text-gc-accent hover:underline">
+            Configure batch →
+          </button>
         </div>
       )}
 

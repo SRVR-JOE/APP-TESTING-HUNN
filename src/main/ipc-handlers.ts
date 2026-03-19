@@ -828,7 +828,20 @@ export function registerIpcHandlers(): void {
 
       const onProgress = (progress: { total: number; completed: number; failed: number; current: string }) => {
         try {
-          event.sender.send('batch:progress', progress);
+          // Parse switch IP from the current string (e.g. "port.setGroup on 10.0.0.5")
+          const parts = progress.current.split(' on ');
+          const parsedIp = parts.length > 1 ? parts[parts.length - 1] : '';
+
+          event.sender.send('event:batchProgress', {
+            switchIp: parsedIp,
+            status: 'in-progress',
+            progress: progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0,
+            currentOperation: progress.current,
+            overallProgress: progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0,
+            total: progress.total,
+            completed: progress.completed,
+            failed: progress.failed,
+          });
         } catch {
           // Renderer may have been destroyed
         }
@@ -844,6 +857,25 @@ export function registerIpcHandlers(): void {
       );
 
       activeBatchExecutor = null;
+
+      // Send per-switch final status events
+      for (const result of results) {
+        try {
+          event.sender.send('event:batchProgress', {
+            switchIp: result.switchIp,
+            status: result.success ? 'success' : 'failed',
+            progress: 100,
+            currentOperation: result.success ? 'Complete' : result.error,
+            error: result.error,
+            overallProgress: 100,
+            total: results.length,
+            completed: results.filter(r => r.success).length,
+            failed: results.filter(r => !r.success).length,
+          });
+        } catch {
+          // Renderer may have been destroyed
+        }
+      }
 
       eventLogger.log('config', 'info', `Batch execution completed: ${results.filter((r) => r.success).length}/${results.length} succeeded`);
 
@@ -869,6 +901,60 @@ export function registerIpcHandlers(): void {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('[IPC] batch:abort error:', message);
+      return fail(message);
+    }
+  });
+
+  // ─── Batch Rollback ──────────────────────────────────────────────────────
+
+  ipcMain.handle('batch:rollback', async (_event, failedResults: unknown[]) => {
+    console.log('[IPC] batch:rollback called');
+    try {
+      if (!Array.isArray(failedResults)) {
+        return fail('failedResults must be an array');
+      }
+      if (failedResults.length === 0) {
+        return fail('failedResults array must not be empty');
+      }
+
+      // Validate each result has the required fields
+      for (let i = 0; i < failedResults.length; i++) {
+        const r = failedResults[i] as Record<string, unknown>;
+        if (!r || typeof r !== 'object') {
+          return fail(`Result at index ${i} must be an object`);
+        }
+        if (!isNonEmptyString(r.switchIp)) {
+          return fail(`Result at index ${i} must have a non-empty switchIp string`);
+        }
+        if (!isNonEmptyString(r.operation)) {
+          return fail(`Result at index ${i} must have a non-empty operation string`);
+        }
+      }
+
+      const typedResults = failedResults as {
+        switchIp: string;
+        operation: string;
+        success: boolean;
+        error?: string;
+        rollbackData?: unknown;
+      }[];
+
+      // Use a fresh BatchExecutor for the rollback
+      let rolledBack = 0;
+      let rollbackFailed = 0;
+
+      const executor = new BatchExecutor({ concurrency: 2 });
+      executor.on('rollback:success', () => { rolledBack++; });
+      executor.on('rollback:error', () => { rollbackFailed++; });
+
+      await executor.rollback(typedResults);
+
+      eventLogger.log('config', 'info', `Batch rollback completed: ${rolledBack} rolled back, ${rollbackFailed} failed`);
+
+      return ok({ rolledBack, failed: rollbackFailed });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[IPC] batch:rollback error:', message);
       return fail(message);
     }
   });
@@ -901,7 +987,7 @@ export function registerIpcHandlers(): void {
         const switchId = String(swConfig.id || swConfig.mac || '');
 
         try {
-          event.sender.send('deploy:progress', {
+          event.sender.send('event:deployProgress', {
             switchId,
             status: 'starting',
             message: `Deploying switch ${i + 1} of ${switches.length}`,
@@ -914,7 +1000,7 @@ export function registerIpcHandlers(): void {
 
           if (!sw) {
             results.push({ switchId, success: false, error: `Switch "${switchId}" not found` });
-            event.sender.send('deploy:progress', {
+            event.sender.send('event:deployProgress', {
               switchId,
               status: 'error',
               message: `Switch "${switchId}" not found`,
@@ -927,7 +1013,7 @@ export function registerIpcHandlers(): void {
           });
 
           // Backup current config before modifying
-          event.sender.send('deploy:progress', { switchId, status: 'backup', message: 'Backing up current config' });
+          event.sender.send('event:deployProgress', { switchId, status: 'backup', message: 'Backing up current config' });
           const [backupSysInfo, backupPorts, backupGroups] = await Promise.all([
             client.getSystemInfo(),
             client.getPorts(),
@@ -944,19 +1030,19 @@ export function registerIpcHandlers(): void {
 
           // 1. Set system name
           if (isNonEmptyString(swConfig.name)) {
-            event.sender.send('deploy:progress', { switchId, status: 'configuring', message: 'Setting system name' });
+            event.sender.send('event:deployProgress', { switchId, status: 'configuring', message: 'Setting system name' });
             await client.setSystemName(swConfig.name as string);
           }
 
           // 2. Set IP configuration
           if (swConfig.ipConfig && typeof swConfig.ipConfig === 'object') {
-            event.sender.send('deploy:progress', { switchId, status: 'configuring', message: 'Setting IP config' });
+            event.sender.send('event:deployProgress', { switchId, status: 'configuring', message: 'Setting IP config' });
             await client.setIpConfig(swConfig.ipConfig as Record<string, unknown>);
           }
 
           // 3. Configure groups
           if (Array.isArray(swConfig.groups)) {
-            event.sender.send('deploy:progress', { switchId, status: 'configuring', message: 'Configuring groups' });
+            event.sender.send('event:deployProgress', { switchId, status: 'configuring', message: 'Configuring groups' });
             for (const group of swConfig.groups as Record<string, unknown>[]) {
               await client.setGroup(group.id as number, {
                 name: group.name as string,
@@ -971,7 +1057,7 @@ export function registerIpcHandlers(): void {
 
           // 4. Configure ports
           if (Array.isArray(swConfig.ports)) {
-            event.sender.send('deploy:progress', { switchId, status: 'configuring', message: 'Configuring ports' });
+            event.sender.send('event:deployProgress', { switchId, status: 'configuring', message: 'Configuring ports' });
             for (const port of swConfig.ports as Record<string, unknown>[]) {
               if (port.groupId !== undefined) {
                 await client.setPortGroup(port.port as number, port.groupId as number);
@@ -981,7 +1067,7 @@ export function registerIpcHandlers(): void {
 
           // 5. Configure IGMP
           if (Array.isArray(swConfig.igmp)) {
-            event.sender.send('deploy:progress', { switchId, status: 'configuring', message: 'Configuring IGMP' });
+            event.sender.send('event:deployProgress', { switchId, status: 'configuring', message: 'Configuring IGMP' });
             for (const igmpEntry of swConfig.igmp as Record<string, unknown>[]) {
               if (igmpEntry.snooping !== undefined) {
                 await client.setIgmpSnooping(igmpEntry.groupId as number, igmpEntry.snooping as boolean);
@@ -994,14 +1080,14 @@ export function registerIpcHandlers(): void {
 
           // 6. Configure PoE
           if (Array.isArray(swConfig.poe)) {
-            event.sender.send('deploy:progress', { switchId, status: 'configuring', message: 'Configuring PoE' });
+            event.sender.send('event:deployProgress', { switchId, status: 'configuring', message: 'Configuring PoE' });
             for (const poeEntry of swConfig.poe as Record<string, unknown>[]) {
               await client.setPortPoe(poeEntry.port as number, poeEntry.enabled as boolean);
             }
           }
 
           results.push({ switchId, success: true });
-          event.sender.send('deploy:progress', { switchId, status: 'complete', message: 'Deployment complete' });
+          event.sender.send('event:deployProgress', { switchId, status: 'complete', message: 'Deployment complete' });
 
           eventLogger.log('config', 'info', `Show file deployed to switch ${sw.name || sw.ip}`, {
             switchMac: sw.mac,
@@ -1010,7 +1096,7 @@ export function registerIpcHandlers(): void {
         } catch (swErr) {
           const swMessage = swErr instanceof Error ? swErr.message : String(swErr);
           results.push({ switchId, success: false, error: swMessage });
-          event.sender.send('deploy:progress', { switchId, status: 'error', message: swMessage });
+          event.sender.send('event:deployProgress', { switchId, status: 'error', message: swMessage });
           console.error(`[IPC] deploy:showFile error for switch ${switchId}:`, swMessage);
         }
       }
@@ -1286,6 +1372,85 @@ export function registerIpcHandlers(): void {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('[IPC] discovery:getSwitchDetails error:', message);
+      return fail(message);
+    }
+  });
+
+  // ─── Config: Save Config ────────────────────────────────────────────────────
+
+  ipcMain.handle('config:saveConfig', async (_event, switchId: string) => {
+    console.log(`[IPC] config:saveConfig called: ${switchId}`);
+    try {
+      if (!isNonEmptyString(switchId)) {
+        return fail('switchId must be a non-empty string');
+      }
+
+      const cleanId = sanitize(switchId);
+
+      // Find the switch in memory or DB
+      const liveSwitches = discoveryManager.getSwitches();
+      const sw = liveSwitches.find((s) => s.id === cleanId || s.ip === cleanId)
+        ?? switchRepo.getSwitchById(cleanId);
+      if (!sw) {
+        return fail(`Switch "${cleanId}" not found. Run a scan first.`);
+      }
+
+      const client = new GigaCoreClient(sw.ip, { generation: sw.generation });
+      await client.saveConfig();
+
+      eventLogger.log('config', 'info', `Configuration saved on switch ${sw.ip} (${cleanId})`);
+
+      return ok({ saved: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[IPC] config:saveConfig error:', message);
+      return fail(message);
+    }
+  });
+
+  // ─── Config: Set Port VLANs ────────────────────────────────────────────────
+
+  ipcMain.handle('config:setPortVlans', async (_event, switchId: string, port: number, config: {
+    mode: 'access' | 'trunk';
+    nativeVlan?: number;
+    taggedVlans?: number[];
+  }) => {
+    console.log(`[IPC] config:setPortVlans called: switch=${switchId} port=${port} mode=${config?.mode}`);
+    try {
+      if (!isNonEmptyString(switchId)) {
+        return fail('switchId must be a non-empty string');
+      }
+      if (typeof port !== 'number' || port < 0) {
+        return fail('port must be a non-negative number');
+      }
+      if (!config || (config.mode !== 'access' && config.mode !== 'trunk')) {
+        return fail('config.mode must be "access" or "trunk"');
+      }
+
+      const cleanId = sanitize(switchId);
+
+      // Find the switch in memory or DB
+      const liveSwitches = discoveryManager.getSwitches();
+      const sw = liveSwitches.find((s) => s.id === cleanId || s.ip === cleanId)
+        ?? switchRepo.getSwitchById(cleanId);
+      if (!sw) {
+        return fail(`Switch "${cleanId}" not found. Run a scan first.`);
+      }
+
+      const client = new GigaCoreClient(sw.ip, { generation: sw.generation });
+
+      if (config.mode === 'access') {
+        const nativeVlan = config.nativeVlan ?? 1;
+        await client.setPortGroup(port, nativeVlan);
+      } else {
+        const taggedVlans = config.taggedVlans ?? [];
+        await client.setPortTrunk(port, taggedVlans);
+      }
+
+      return ok({ configured: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[IPC] config:setPortVlans error:', message);
       return fail(message);
     }
   });

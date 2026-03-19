@@ -14,13 +14,28 @@ export interface SwitchInfo {
   mac: string;
   firmware: string;
   status: 'healthy' | 'warning' | 'critical' | 'offline';
-  ports: PortInfo[];
+  ports?: PortInfo[];
   poeBudgetWatts: number;
   poeDrawWatts: number;
   uptime?: string;
   location?: string;
   rackGroup?: string;
   lastSeen: string;
+}
+
+/** Shape returned by getSwitchDetails — enriched switch data. */
+export interface SwitchDetails {
+  id: string;
+  name: string;
+  model: string;
+  ip: string;
+  mac: string;
+  firmware: string;
+  ports?: PortInfo[];
+  groups?: { id: number; name: string; color?: string }[];
+  temperature?: number;
+  uptime?: string;
+  poe?: { budgetW: number; drawW: number };
 }
 
 /** Device shape used exclusively by the renderer mock / discovery hooks. */
@@ -53,7 +68,7 @@ interface MockElectronAPI {
   openWebUI: (ip: string) => void;
   exportCSV: () => Promise<void>;
   getLocalSubnets: () => Promise<string[]>;
-  getSwitchDetails: (switchId: string) => Promise<any>;
+  getSwitchDetails: (switchId: string) => Promise<SwitchDetails | null>;
   onScanProgress: (cb: (progress: ScanProgressPayload) => void) => () => void;
   onSwitchUpdate: () => () => void;
 }
@@ -319,7 +334,7 @@ const mockAPI: MockElectronAPI = {
     // no-op in dev
   },
   getLocalSubnets: async () => MOCK_SUBNETS,
-  getSwitchDetails: async (switchId: string) => {
+  getSwitchDetails: async (switchId: string): Promise<SwitchDetails | null> => {
     // Return mock details based on the switchId
     await new Promise((r) => setTimeout(r, 500));
     const sw = MOCK_SWITCHES.find((s) => s.id === switchId);
@@ -423,6 +438,7 @@ export function useDiscovery() {
 
   return {
     switches,
+    setSwitches,
     isScanning,
     scanProgress,
     scanScanned,

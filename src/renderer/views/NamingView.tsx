@@ -6,7 +6,7 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import { useNamingStore } from '../store/useNamingStore';
 import { useRackMapStore } from '../store/useRackMapStore';
-import { LOCATION_TYPE_CONFIG } from '@shared/constants';
+import { LOCATION_TYPE_CONFIG, VIEWS } from '@shared/constants';
 import { extractVariables } from '../lib/naming-engine';
 import type { LocationType, DiscoveredSwitch, NamingTemplate } from '@shared/types';
 import { LocationTypeBadge } from '../components/LocationTypeBadge';
@@ -84,9 +84,12 @@ export default function NamingView() {
     addTemplate, updateTemplate, deleteTemplate,
   } = useNamingStore();
 
+  const setView = useAppStore((s) => s.setView);
+
   const [showEditor, setShowEditor] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<NamingTemplate | null>(null);
   const [filterLocationType, setFilterLocationType] = useState<LocationType | 'all'>('all');
+  const [appliedCount, setAppliedCount] = useState(0);
 
   const selectedTemplate = useMemo(
     () => templates.find((t) => t.id === selectedTemplateId) ?? null,
@@ -132,8 +135,10 @@ export default function NamingView() {
 
   const handleApply = useCallback(() => {
     if (conflicts.length > 0) return;
+    const count = previewNames.length;
     applyNames();
-  }, [conflicts, applyNames]);
+    setAppliedCount(count);
+  }, [conflicts, applyNames, previewNames.length]);
 
   return (
     <div className="space-y-6">
@@ -340,6 +345,19 @@ export default function NamingView() {
               <Zap size={14} />
               APPLY {previewNames.length} NAME{previewNames.length !== 1 ? 'S' : ''}
             </button>
+          )}
+
+          {/* Next-step prompt after applying names */}
+          {appliedCount > 0 && (
+            <div className="flex items-center gap-3 px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-lg text-sm mt-3">
+              <span className="text-green-400">{appliedCount} names applied.</span>
+              <button onClick={() => setView(VIEWS.BATCH_CONFIG)} className="text-gc-accent hover:underline">
+                Configure batch →
+              </button>
+              <button onClick={() => setView(VIEWS.SHOW_FILE)} className="text-gc-accent hover:underline">
+                Create show file →
+              </button>
+            </div>
           )}
 
           {/* Empty state */}

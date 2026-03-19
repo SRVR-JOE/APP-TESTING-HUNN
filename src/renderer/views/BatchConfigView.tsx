@@ -13,8 +13,11 @@ import {
   AlertTriangle,
   RotateCcw,
   Power,
+  Download,
 } from 'lucide-react';
 import type { DiscoveredSwitch, HealthStatus } from '@shared/types';
+import { useAppStore } from '../store/useAppStore';
+import { VIEWS } from '@shared/constants';
 import { BatchSelector } from '../components/BatchSelector';
 import { BatchPreview } from '../components/BatchPreview';
 import type { BatchOperationPreview } from '../components/BatchPreview';
@@ -190,6 +193,8 @@ function buildFirmwarePreview(
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function BatchConfigView() {
+  const setView = useAppStore((s) => s.setView);
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<TabId>('groups');
   const [groupBy, setGroupBy] = useState<'model' | 'rack' | 'none'>('rack');
@@ -207,7 +212,44 @@ export default function BatchConfigView() {
   const [executionLog, setExecutionLog] = useState<string[]>([]);
   const executionTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Pre-flight connectivity check state
+  const [preFlightRunning, setPreFlightRunning] = useState(false);
+  const [preFlightWarning, setPreFlightWarning] = useState<string[] | null>(null);
+
   const selectedSwitches = MOCK_SWITCHES.filter((s) => selectedIds.has(s.id));
+
+  // ─── Tab-specific form state ───────────────────────────────────────
+
+  // Ports tab state
+  const [portAssignments, setPortAssignments] = useState<
+    Array<{ portRange: string; groupId: number }>
+  >([
+    { portRange: '1-8', groupId: 1 },
+    { portRange: '9-16', groupId: 2 },
+  ]);
+
+  // IGMP tab state
+  const IGMP_GROUP_NAMES = ['Control', 'Audio Primary', 'Audio Secondary', 'Video', 'Lighting', 'Intercom'];
+  const [igmpSettings, setIgmpSettings] = useState<
+    Array<{ groupId: number; name: string; snooping: boolean; querier: boolean; flooding: boolean }>
+  >(
+    IGMP_GROUP_NAMES.map((name, i) => ({
+      groupId: i + 1,
+      name,
+      snooping: i !== 4,
+      querier: i === 1 || i === 3,
+      flooding: i === 3,
+    }))
+  );
+
+  // PoE tab state
+  const [poeSettings, setPoeSettings] = useState<
+    Array<{ portRange: string; enabled: boolean; priority: string }>
+  >([{ portRange: '1-8', enabled: true, priority: 'Critical' }]);
+
+  // Profile tab state
+  const PROFILE_OPTIONS = ['Solotech Standard Audio', 'Solotech Video Production', 'Festival Main Stage', 'Corporate AV Default'];
+  const [profileSlot, setProfileSlot] = useState(1);
 
   // ─── Preview handlers ─────────────────────────────────────────────────
 
@@ -719,12 +761,91 @@ export default function BatchConfigView() {
     setOverallProgress(100);
   }, []);
 
-  const handleRollback = useCallback(() => {
-    setExecutionLog((l) => [...l, '[INFO] Rollback initiated for failed switches...']);
-    // In a real app this would trigger rollback logic via IPC
-    setTimeout(() => {
-      setExecutionLog((l) => [...l, '[OK] Rollback complete']);
-    }, 1000);
+  const handleRollback = useCallback(async () => {
+    const api = (window as any).electronAPI;
+
+    if (!api?.batchRollback) {
+      setExecutionLog((l) => [...l, '[WARN] Rollback not available (simulation mode)']);
+      return;
+    }
+
+    const failedOps = batchStatuses
+      .filter((s) => s.status === 'failed')
+      .map((s) => ({ switchIp: s.switchIp, operation: s.currentOperation ?? 'unknown' }));
+
+    if (failedOps.length === 0) {
+      setExecutionLog((l) => [...l, '[INFO] No failed operations to rollback']);
+      return;
+    }
+
+    setExecutionLog((l) => [...l, `[INFO] Rolling back ${failedOps.length} failed operations...`]);
+
+    try {
+      const result = await api.batchRollback(failedOps);
+      setExecutionLog((l) => [
+        ...l,
+        `[OK] Rollback complete: ${result.rolledBack} restored, ${result.failed} could not be restored`,
+      ]);
+    } catch (err) {
+      setExecutionLog((l) => [
+        ...l,
+        `[ERROR] Rollback failed: ${err instanceof Error ? err.message : String(err)}`,
+      ]);
+    }
+  }, [batchStatuses]);
+
+  // ─── Pre-flight connectivity check ──────────────────────────────
+
+  const handlePreFlight = useCallback(async () => {
+    if (selectedSwitches.length === 0) return;
+
+    const api = (window as any).electronAPI;
+
+    setPreFlightRunning(true);
+    setPreFlightWarning(null);
+    setExecutionLog((l) => [...l, `[INFO] Pre-flight check: pinging ${selectedSwitches.length} switches...`]);
+
+    const unreachable: string[] = [];
+
+    for (const sw of selectedSwitches) {
+      try {
+        if (api?.pingSwitch) {
+          const result = await api.pingSwitch(sw.ip);
+          if (!result.alive) {
+            unreachable.push(sw.ip);
+          }
+        } else {
+          // Simulation mode: treat offline switches as unreachable
+          if (!sw.isOnline) {
+            unreachable.push(sw.ip);
+          }
+        }
+      } catch {
+        unreachable.push(sw.ip);
+      }
+    }
+
+    const reachableCount = selectedSwitches.length - unreachable.length;
+    setExecutionLog((l) => [
+      ...l,
+      `[OK] ${reachableCount}/${selectedSwitches.length} switches reachable`,
+    ]);
+
+    if (unreachable.length > 0) {
+      setExecutionLog((l) => [
+        ...l,
+        `[WARN] ${unreachable.length} switches unreachable: ${unreachable.join(', ')}`,
+      ]);
+      setPreFlightWarning(unreachable);
+    } else {
+      setPreFlightWarning(null);
+    }
+
+    setPreFlightRunning(false);
+  }, [selectedSwitches]);
+
+  const dismissPreFlightWarning = useCallback(() => {
+    setPreFlightWarning(null);
   }, []);
 
   // Cleanup timer on unmount
@@ -740,6 +861,23 @@ export default function BatchConfigView() {
     setExecutionLog([]);
   };
 
+  const handleExportTemplate = useCallback(() => {
+    const rows = [
+      ['Switch Name', 'IP', 'Model', 'Port Range', 'Group ID', 'VLAN ID', 'PoE Enabled'].join(','),
+      ...selectedSwitches.map((sw) =>
+        [sw.name, sw.ip, sw.model, `1-${sw.portCount}`, '', '', ''].join(',')
+      ),
+    ];
+    const csvContent = rows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `switch-config-template-${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [selectedSwitches]);
+
   const showingProgress = batchStatuses.length > 0;
 
   // ─── Tab content renderers ────────────────────────────────────────────
@@ -752,52 +890,56 @@ export default function BatchConfigView() {
     />
   );
 
+  const PORT_GROUP_OPTIONS = [
+    { value: 1, label: 'Group 1 - Control' },
+    { value: 2, label: 'Group 2 - Audio Primary' },
+    { value: 3, label: 'Group 3 - Audio Secondary' },
+    { value: 4, label: 'Group 4 - Video' },
+    { value: 5, label: 'Group 5 - Lighting' },
+    { value: 6, label: 'Group 6 - Intercom' },
+  ];
+
   const renderPortsTab = () => (
     <div className="space-y-4">
       <h4 className="text-sm font-medium text-white">Port Assignment</h4>
       <p className="text-xs text-gray-400">Assign port ranges to groups across the fleet</p>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-xs text-gray-400 mb-1">Port Range</label>
-          <input
-            type="text"
-            defaultValue="1-8"
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent"
-          />
+      {portAssignments.map((assignment, idx) => (
+        <div key={idx} className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Port Range</label>
+            <input
+              type="text"
+              value={assignment.portRange}
+              onChange={(e) => {
+                setPortAssignments((prev) => {
+                  const next = [...prev];
+                  next[idx] = { ...next[idx], portRange: e.target.value };
+                  return next;
+                });
+              }}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Assign to Group</label>
+            <select
+              value={assignment.groupId}
+              onChange={(e) => {
+                setPortAssignments((prev) => {
+                  const next = [...prev];
+                  next[idx] = { ...next[idx], groupId: parseInt(e.target.value) };
+                  return next;
+                });
+              }}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent"
+            >
+              {PORT_GROUP_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
-        <div>
-          <label className="block text-xs text-gray-400 mb-1">Assign to Group</label>
-          <select className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent">
-            <option>Group 1 - Control</option>
-            <option>Group 2 - Audio Primary</option>
-            <option>Group 3 - Audio Secondary</option>
-            <option>Group 4 - Video</option>
-            <option>Group 5 - Lighting</option>
-            <option>Group 6 - Intercom</option>
-          </select>
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-xs text-gray-400 mb-1">Port Range</label>
-          <input
-            type="text"
-            defaultValue="9-16"
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent"
-          />
-        </div>
-        <div>
-          <label className="block text-xs text-gray-400 mb-1">Assign to Group</label>
-          <select className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent">
-            <option>Group 2 - Audio Primary</option>
-            <option>Group 1 - Control</option>
-            <option>Group 3 - Audio Secondary</option>
-            <option>Group 4 - Video</option>
-            <option>Group 5 - Lighting</option>
-            <option>Group 6 - Intercom</option>
-          </select>
-        </div>
-      </div>
+      ))}
       <div className="flex items-center gap-3 pt-4 border-t border-gray-700">
         <button
           onClick={() =>
@@ -805,10 +947,15 @@ export default function BatchConfigView() {
               selectedSwitches.map((sw) => ({
                 switchName: sw.name,
                 switchIp: sw.ip,
-                changes: [
-                  { field: 'Ports 1-8', currentValue: 'Group 1', newValue: 'Group 1 - Control', type: 'change' as const },
-                  { field: 'Ports 9-16', currentValue: 'Group 1', newValue: 'Group 2 - Audio Primary', type: 'change' as const },
-                ],
+                changes: portAssignments.map((a) => {
+                  const groupLabel = PORT_GROUP_OPTIONS.find((o) => o.value === a.groupId)?.label || `Group ${a.groupId}`;
+                  return {
+                    field: `Ports ${a.portRange}`,
+                    currentValue: 'Group 1',
+                    newValue: groupLabel,
+                    type: 'change' as const,
+                  };
+                }),
               })),
               'Port Assignment'
             )
@@ -818,7 +965,7 @@ export default function BatchConfigView() {
           Preview Changes
         </button>
         <button
-          onClick={() => realExecution('ports')}
+          onClick={() => realExecution('ports', portAssignments)}
           disabled={!previewReviewed}
           className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
             previewReviewed ? 'bg-gc-accent text-white hover:bg-gc-accent/80' : 'bg-gray-700 text-gray-500 cursor-not-allowed'
@@ -845,22 +992,53 @@ export default function BatchConfigView() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-700/50">
-            {['Control', 'Audio Primary', 'Audio Secondary', 'Video', 'Lighting', 'Intercom'].map(
-              (name, i) => (
-                <tr key={name} className="hover:bg-gray-800/50">
-                  <td className="py-2 px-3 text-white">{name}</td>
-                  <td className="py-2 px-3 text-center">
-                    <input type="checkbox" defaultChecked={i !== 4} className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-gc-accent" />
-                  </td>
-                  <td className="py-2 px-3 text-center">
-                    <input type="checkbox" defaultChecked={i === 1 || i === 3} className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-gc-accent" />
-                  </td>
-                  <td className="py-2 px-3 text-center">
-                    <input type="checkbox" defaultChecked={i === 3} className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-gc-accent" />
-                  </td>
-                </tr>
-              )
-            )}
+            {igmpSettings.map((setting, i) => (
+              <tr key={setting.name} className="hover:bg-gray-800/50">
+                <td className="py-2 px-3 text-white">{setting.name}</td>
+                <td className="py-2 px-3 text-center">
+                  <input
+                    type="checkbox"
+                    checked={setting.snooping}
+                    onChange={(e) => {
+                      setIgmpSettings((prev) => {
+                        const next = [...prev];
+                        next[i] = { ...next[i], snooping: e.target.checked };
+                        return next;
+                      });
+                    }}
+                    className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-gc-accent"
+                  />
+                </td>
+                <td className="py-2 px-3 text-center">
+                  <input
+                    type="checkbox"
+                    checked={setting.querier}
+                    onChange={(e) => {
+                      setIgmpSettings((prev) => {
+                        const next = [...prev];
+                        next[i] = { ...next[i], querier: e.target.checked };
+                        return next;
+                      });
+                    }}
+                    className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-gc-accent"
+                  />
+                </td>
+                <td className="py-2 px-3 text-center">
+                  <input
+                    type="checkbox"
+                    checked={setting.flooding}
+                    onChange={(e) => {
+                      setIgmpSettings((prev) => {
+                        const next = [...prev];
+                        next[i] = { ...next[i], flooding: e.target.checked };
+                        return next;
+                      });
+                    }}
+                    className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-gc-accent"
+                  />
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -871,10 +1049,12 @@ export default function BatchConfigView() {
               selectedSwitches.map((sw) => ({
                 switchName: sw.name,
                 switchIp: sw.ip,
-                changes: [
-                  { field: 'IGMP Snooping (Audio Primary)', currentValue: 'Disabled', newValue: 'Enabled', type: 'change' as const },
-                  { field: 'IGMP Querier (Video)', currentValue: 'Disabled', newValue: 'Enabled', type: 'add' as const },
-                ],
+                changes: igmpSettings.map((s) => ({
+                  field: `IGMP Snooping (${s.name})`,
+                  currentValue: 'Unknown',
+                  newValue: s.snooping ? 'Enabled' : 'Disabled',
+                  type: 'change' as const,
+                })),
               })),
               'IGMP Configuration'
             )
@@ -884,7 +1064,12 @@ export default function BatchConfigView() {
           Preview Changes
         </button>
         <button
-          onClick={() => realExecution('igmp')}
+          onClick={() =>
+            realExecution(
+              'igmp',
+              igmpSettings.map((s) => ({ groupId: s.groupId, enabled: s.snooping }))
+            )
+          }
           disabled={!previewReviewed}
           className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
             previewReviewed ? 'bg-gc-accent text-white hover:bg-gc-accent/80' : 'bg-gray-700 text-gray-500 cursor-not-allowed'
@@ -900,31 +1085,60 @@ export default function BatchConfigView() {
     <div className="space-y-4">
       <h4 className="text-sm font-medium text-white">PoE Configuration</h4>
       <p className="text-xs text-gray-400">Enable/disable PoE and set priority for port ranges</p>
-      <div className="grid grid-cols-3 gap-4">
-        <div>
-          <label className="block text-xs text-gray-400 mb-1">Port Range</label>
-          <input
-            type="text"
-            defaultValue="1-8"
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent"
-          />
+      {poeSettings.map((setting, idx) => (
+        <div key={idx} className="grid grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Port Range</label>
+            <input
+              type="text"
+              value={setting.portRange}
+              onChange={(e) => {
+                setPoeSettings((prev) => {
+                  const next = [...prev];
+                  next[idx] = { ...next[idx], portRange: e.target.value };
+                  return next;
+                });
+              }}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">PoE</label>
+            <select
+              value={setting.enabled ? 'Enabled' : 'Disabled'}
+              onChange={(e) => {
+                setPoeSettings((prev) => {
+                  const next = [...prev];
+                  next[idx] = { ...next[idx], enabled: e.target.value === 'Enabled' };
+                  return next;
+                });
+              }}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent"
+            >
+              <option>Enabled</option>
+              <option>Disabled</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Priority</label>
+            <select
+              value={setting.priority}
+              onChange={(e) => {
+                setPoeSettings((prev) => {
+                  const next = [...prev];
+                  next[idx] = { ...next[idx], priority: e.target.value };
+                  return next;
+                });
+              }}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent"
+            >
+              <option>Critical</option>
+              <option>High</option>
+              <option>Low</option>
+            </select>
+          </div>
         </div>
-        <div>
-          <label className="block text-xs text-gray-400 mb-1">PoE</label>
-          <select className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent">
-            <option>Enabled</option>
-            <option>Disabled</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-gray-400 mb-1">Priority</label>
-          <select className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent">
-            <option>Critical</option>
-            <option>High</option>
-            <option>Low</option>
-          </select>
-        </div>
-      </div>
+      ))}
       <div className="flex items-center gap-3 pt-4 border-t border-gray-700">
         <button
           onClick={() =>
@@ -932,9 +1146,12 @@ export default function BatchConfigView() {
               selectedSwitches.map((sw) => ({
                 switchName: sw.name,
                 switchIp: sw.ip,
-                changes: [
-                  { field: 'Ports 1-8 PoE', currentValue: 'Disabled', newValue: 'Enabled (Critical)', type: 'change' as const },
-                ],
+                changes: poeSettings.map((s) => ({
+                  field: `Ports ${s.portRange} PoE`,
+                  currentValue: 'Unknown',
+                  newValue: `${s.enabled ? 'Enabled' : 'Disabled'} (${s.priority})`,
+                  type: 'change' as const,
+                })),
               })),
               'PoE Configuration'
             )
@@ -944,7 +1161,12 @@ export default function BatchConfigView() {
           Preview Changes
         </button>
         <button
-          onClick={() => realExecution('poe')}
+          onClick={() =>
+            realExecution(
+              'poe',
+              poeSettings.map((s) => ({ portRange: s.portRange, enabled: s.enabled }))
+            )
+          }
           disabled={!previewReviewed}
           className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
             previewReviewed ? 'bg-gc-accent text-white hover:bg-gc-accent/80' : 'bg-gray-700 text-gray-500 cursor-not-allowed'
@@ -980,11 +1202,14 @@ export default function BatchConfigView() {
       <p className="text-xs text-gray-400">Select a saved profile and push to all selected switches</p>
       <div>
         <label className="block text-xs text-gray-400 mb-1">Select Profile</label>
-        <select className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent">
-          <option>Solotech Standard Audio</option>
-          <option>Solotech Video Production</option>
-          <option>Festival Main Stage</option>
-          <option>Corporate AV Default</option>
+        <select
+          value={profileSlot}
+          onChange={(e) => setProfileSlot(parseInt(e.target.value))}
+          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gc-accent"
+        >
+          {PROFILE_OPTIONS.map((name, i) => (
+            <option key={i + 1} value={i + 1}>{name}</option>
+          ))}
         </select>
       </div>
       <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
@@ -1016,7 +1241,7 @@ export default function BatchConfigView() {
                 switchName: sw.name,
                 switchIp: sw.ip,
                 changes: [
-                  { field: 'Profile', currentValue: '(custom)', newValue: 'Solotech Standard Audio', type: 'change' as const },
+                  { field: 'Profile', currentValue: '(custom)', newValue: PROFILE_OPTIONS[profileSlot - 1] || `Slot ${profileSlot}`, type: 'change' as const },
                   { field: 'Groups', currentValue: 'varies', newValue: '6 groups configured', type: 'change' as const },
                 ],
               })),
@@ -1028,7 +1253,7 @@ export default function BatchConfigView() {
           Preview Changes
         </button>
         <button
-          onClick={() => realExecution('profile', 1)}
+          onClick={() => realExecution('profile', profileSlot)}
           disabled={!previewReviewed}
           className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
             previewReviewed ? 'bg-gc-accent text-white hover:bg-gc-accent/80' : 'bg-gray-700 text-gray-500 cursor-not-allowed'
@@ -1157,12 +1382,21 @@ export default function BatchConfigView() {
       {/* Header */}
       <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-700">
         <Layers size={24} className="text-gc-accent" />
-        <div>
+        <div className="flex-1">
           <h2 className="text-xl font-semibold text-white">Batch Configuration</h2>
           <p className="text-xs text-gray-400">
             Apply configuration to multiple GigaCore switches simultaneously
           </p>
         </div>
+        {selectedSwitches.length > 0 && (
+          <button
+            onClick={handleExportTemplate}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-gray-700 text-gray-300 border border-gray-600 rounded-lg hover:bg-gray-600 hover:text-white transition-colors"
+          >
+            <Download size={14} />
+            Export Template
+          </button>
+        )}
       </div>
 
       <div className="flex flex-1 min-h-0">
@@ -1216,6 +1450,17 @@ export default function BatchConfigView() {
                 onRollback={handleRollback}
                 log={executionLog}
               />
+              {!isExecuting && batchStatuses.length > 0 && batchStatuses.every(s => s.status === 'success') && (
+                <div className="flex items-center gap-3 px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-lg text-sm mt-3">
+                  <span className="text-green-400">Batch complete — all switches configured.</span>
+                  <button onClick={() => setView(VIEWS.SHOW_FILE)} className="text-gc-accent hover:underline">
+                    Save as show file →
+                  </button>
+                  <button onClick={() => setView(VIEWS.SCANNER)} className="text-gc-accent hover:underline">
+                    Verify in scanner →
+                  </button>
+                </div>
+              )}
               {!isExecuting && (
                 <div className="mt-4 flex justify-end">
                   <button
@@ -1259,15 +1504,50 @@ export default function BatchConfigView() {
                       {selectedSwitches.length} switch{selectedSwitches.length > 1 ? 'es' : ''}
                     </span>
                     <span>selected:</span>
-                    <span className="text-gray-400">
+                    <span className="text-gray-400 flex-1">
                       {selectedSwitches
                         .slice(0, 4)
                         .map((s) => s.name)
                         .join(', ')}
                       {selectedSwitches.length > 4 && ` +${selectedSwitches.length - 4} more`}
                     </span>
+                    <button
+                      onClick={handlePreFlight}
+                      disabled={preFlightRunning || isExecuting || selectedSwitches.length === 0}
+                      className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white text-sm rounded disabled:opacity-50"
+                    >
+                      {preFlightRunning ? 'Checking...' : 'Pre-Flight Check'}
+                    </button>
                   </div>
                 )}
+
+                {/* Pre-flight unreachable warning banner */}
+                {preFlightWarning && preFlightWarning.length > 0 && (
+                  <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                    <AlertTriangle className="w-5 h-5 text-yellow-400 flex-shrink-0" />
+                    <div className="flex-1 text-sm">
+                      <p className="text-yellow-300 font-medium">
+                        {preFlightWarning.length} switch{preFlightWarning.length > 1 ? 'es' : ''} unreachable
+                      </p>
+                      <p className="text-yellow-400/70 text-xs mt-0.5">
+                        {preFlightWarning.join(', ')}
+                      </p>
+                    </div>
+                    <button
+                      onClick={dismissPreFlightWarning}
+                      className="px-3 py-1.5 text-xs font-medium bg-yellow-600/20 text-yellow-300 border border-yellow-500/30 rounded hover:bg-yellow-600/30 transition-colors"
+                    >
+                      Proceed Anyway
+                    </button>
+                    <button
+                      onClick={() => setPreFlightWarning(null)}
+                      className="px-3 py-1.5 text-xs font-medium bg-gray-700 text-gray-300 rounded hover:bg-gray-600 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+
                 {tabRenderers[activeTab]()}
               </div>
             </>

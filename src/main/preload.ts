@@ -63,6 +63,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     invoke('config:backupSwitch', switchId),
   restoreSwitch: (switchId: string, backupPath: string) =>
     invoke('config:restoreSwitch', switchId, backupPath),
+  saveConfig: (switchId: string) =>
+    invoke('config:saveConfig', switchId),
+  setPortVlans: (switchId: string, port: number, config: unknown) =>
+    invoke('config:setPortVlans', switchId, port, config),
 
   // Excel
   generateTemplate: (model: string) =>
@@ -109,6 +113,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     invoke('batch:execute', operations, options),
   batchAbort: () =>
     invoke('batch:abort'),
+  batchRollback: (failedResults: unknown[]) =>
+    invoke('batch:rollback', failedResults),
 
   // Deploy Show File
   deployShowFile: (showFileConfig: unknown) =>
@@ -131,16 +137,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onHealthAlert: createEventListener('event:healthAlert'),
   onLogEvent: createEventListener('event:logEvent'),
   onBatchProgress: createEventListener<{
+    switchIp: string;
+    status: string;
+    progress: number;
+    currentOperation: string;
+    overallProgress: number;
     total: number;
     completed: number;
     failed: number;
-    current: string;
-  }>('batch:progress'),
+    error?: string;
+  }>('event:batchProgress'),
   onDeployProgress: createEventListener<{
     switchId: string;
     status: string;
     message: string;
-  }>('deploy:progress'),
+  }>('event:deployProgress'),
   onFirmwareProgress: createEventListener<{
     switchId: string;
     percent: number;

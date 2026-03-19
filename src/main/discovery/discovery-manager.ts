@@ -11,6 +11,7 @@ import { MdnsScanner } from './mdns-scanner';
 import { SubnetScanner } from './subnet-scanner';
 import { LldpListener } from './lldp-listener';
 import { MacOuiResolver } from './mac-oui-resolver';
+import { GigaCoreClient } from '../api/gigacore-client';
 import type {
   DiscoveredSwitch,
   DiscoveredDevice,
@@ -18,6 +19,7 @@ import type {
   SubnetScanResult,
   LldpNeighbor,
 } from './types';
+import type { SwitchPort, SwitchGroup } from '../../shared/types';
 import { getPortCountForModel } from './types';
 
 // ── Event type map (for documentation — TypeScript EventEmitter doesn't
@@ -41,6 +43,9 @@ const DEFAULT_GIGACORE_SUBNETS = ['2.0.0.0/24', '192.168.0.0/24'];
 /** How long before a switch is considered lost (ms). */
 const SWITCH_LOST_TIMEOUT_MS = 120_000; // 2 minutes
 
+/** Maximum number of concurrent enrichment tasks. */
+const MAX_CONCURRENT_ENRICHMENTS = 5;
+
 export class DiscoveryManager extends EventEmitter {
   private mdnsScanner: MdnsScanner;
   private subnetScanner: SubnetScanner;
@@ -53,6 +58,9 @@ export class DiscoveryManager extends EventEmitter {
   private scanAbortController: AbortController | null = null;
   private nextDeviceId = 1;
   private destroyed = false;
+  private enrichmentActive = 0;
+  private enrichmentQueue: Array<{ ip: string; generation: 1 | 2 }> = [];
+  private enrichedIps: Set<string> = new Set();
 
   constructor() {
     super();
@@ -260,6 +268,8 @@ export class DiscoveryManager extends EventEmitter {
     this.mdnsScanner.destroy();
     this.switches.clear();
     this.devices.clear();
+    this.enrichedIps.clear();
+    this.enrichmentQueue.length = 0;
     this.removeAllListeners();
   }
 
@@ -346,6 +356,11 @@ export class DiscoveryManager extends EventEmitter {
 
       this.switches.set(result.ip, updated);
       this.emit('switch:updated', updated);
+
+      // Enrich in background if not already enriched
+      if (!this.enrichedIps.has(result.ip)) {
+        this.scheduleEnrichment(result.ip, updated.generation);
+      }
     } else {
       // New switch
       const mac = result.mac
@@ -371,6 +386,9 @@ export class DiscoveryManager extends EventEmitter {
 
       this.switches.set(result.ip, sw);
       this.emit('switch:found', sw);
+
+      // Enrich in background after initial detection
+      this.scheduleEnrichment(result.ip, sw.generation);
     }
   }
 
@@ -414,6 +432,211 @@ export class DiscoveryManager extends EventEmitter {
         existing.connectedSwitchMac = switchMac;
         existing.connectedPort = neighbor.localPort;
       }
+    }
+  }
+
+  // ── Private: enrichment ─────────────────────────────────────────────────
+
+  /**
+   * Schedule an enrichment task, respecting the concurrency limit.
+   * If we are at capacity, the request is queued and drained automatically.
+   */
+  private scheduleEnrichment(ip: string, generation: 1 | 2): void {
+    if (this.destroyed) return;
+
+    if (this.enrichmentActive < MAX_CONCURRENT_ENRICHMENTS) {
+      this.enrichmentActive++;
+      this.enrichSwitchDetails(ip, generation)
+        .catch((err) =>
+          console.warn(`[Discovery] Failed to enrich ${ip}:`, err),
+        )
+        .finally(() => {
+          this.enrichmentActive--;
+          this.drainEnrichmentQueue();
+        });
+    } else {
+      // Avoid duplicate queue entries
+      if (!this.enrichmentQueue.some((q) => q.ip === ip)) {
+        this.enrichmentQueue.push({ ip, generation });
+      }
+    }
+  }
+
+  /**
+   * Process the next item in the enrichment queue if capacity allows.
+   */
+  private drainEnrichmentQueue(): void {
+    while (
+      this.enrichmentQueue.length > 0 &&
+      this.enrichmentActive < MAX_CONCURRENT_ENRICHMENTS &&
+      !this.destroyed
+    ) {
+      const next = this.enrichmentQueue.shift();
+      if (!next) break;
+
+      // Skip if already enriched while it was queued
+      if (this.enrichedIps.has(next.ip)) continue;
+
+      // Skip if the switch went offline while queued
+      const sw = this.switches.get(next.ip);
+      if (!sw || !sw.isOnline) continue;
+
+      this.enrichmentActive++;
+      this.enrichSwitchDetails(next.ip, next.generation)
+        .catch((err) =>
+          console.warn(`[Discovery] Failed to enrich ${next.ip}:`, err),
+        )
+        .finally(() => {
+          this.enrichmentActive--;
+          this.drainEnrichmentQueue();
+        });
+    }
+  }
+
+  /**
+   * Fetch detailed port, group, PoE, and system data from a switch
+   * and merge it into the discovered switch record.
+   */
+  private async enrichSwitchDetails(
+    ip: string,
+    generation: 1 | 2,
+  ): Promise<void> {
+    if (this.destroyed) return;
+
+    // Skip if already enriched (has port data)
+    const existing = this.switches.get(ip);
+    if (!existing || !existing.isOnline) return;
+    if (existing.ports && existing.ports.length > 0) {
+      this.enrichedIps.add(ip);
+      return;
+    }
+
+    console.log(`[Discovery] Enriching switch details for ${ip}`);
+
+    const client = new GigaCoreClient(ip, {
+      generation,
+      timeoutMs: 8000,
+    });
+
+    // Fetch all data in parallel, allowing individual failures
+    const [systemResult, portsResult, groupsResult, poeResult] =
+      await Promise.allSettled([
+        client.getSystemInfo(),
+        client.getPorts(),
+        client.getGroups(),
+        client.getPoeSummary(),
+      ]);
+
+    // Bail if the manager was destroyed during the fetch
+    if (this.destroyed) return;
+
+    // Re-read the switch — it may have been updated during the async calls
+    const sw = this.switches.get(ip);
+    if (!sw) return;
+
+    const updated: DiscoveredSwitch = { ...sw };
+
+    // ── System info ──────────────────────────────────────────────────────
+    if (systemResult.status === 'fulfilled') {
+      const sysInfo = systemResult.value;
+      if (sysInfo.serial) updated.serial = sysInfo.serial;
+      if (sysInfo.firmware) updated.firmware = sysInfo.firmware;
+      if (sysInfo.temperature !== undefined) {
+        updated.temperature = sysInfo.temperature;
+      }
+      if (sysInfo.uptime !== undefined) {
+        updated.uptime = String(sysInfo.uptime);
+      }
+    }
+
+    // ── Ports ────────────────────────────────────────────────────────────
+    if (portsResult.status === 'fulfilled') {
+      const portInfos = portsResult.value;
+      const mappedPorts: SwitchPort[] = portInfos.map((p) => ({
+        port: p.port,
+        label: p.label ?? '',
+        linkUp: p.operStatus === 'up',
+        speedMbps: this.parseSpeedMbps(p.speed),
+        maxSpeedMbps: this.parseMaxSpeedMbps(p.type),
+        errorsPerMin: 0,
+        isTrunk: p.vlanMode === 'trunk',
+        vlans: p.trunkGroups ?? (p.groupId !== undefined ? [p.groupId] : []),
+        groupVlan: p.groupId !== undefined ? String(p.groupId) : undefined,
+        mode: p.vlanMode,
+        trunkGroups: p.trunkGroups ? p.trunkGroups.join(',') : undefined,
+        poeEnabled: p.poeEnabled,
+        speed: p.speed,
+      }));
+
+      updated.ports = mappedPorts;
+      updated.portsUp = mappedPorts.filter((p) => p.linkUp).length;
+      updated.portCount = mappedPorts.length || updated.portCount;
+    }
+
+    // ── Groups ───────────────────────────────────────────────────────────
+    if (groupsResult.status === 'fulfilled') {
+      const groupConfigs = groupsResult.value;
+      const mappedGroups: SwitchGroup[] = groupConfigs.map((g) => ({
+        groupNumber: g.id,
+        name: g.name,
+        vlanId: g.vlanId,
+        igmpSnooping: g.igmpSnooping,
+        igmpQuerier: g.igmpQuerier,
+        unknownFlooding: g.unknownFlooding,
+      }));
+
+      updated.groups = mappedGroups;
+    }
+
+    // ── PoE ──────────────────────────────────────────────────────────────
+    if (poeResult.status === 'fulfilled') {
+      const poeSummary = poeResult.value;
+      if (poeSummary.available) {
+        updated.poe = {
+          budgetW: poeSummary.totalBudgetWatts,
+          drawW: poeSummary.totalDrawWatts,
+        };
+      }
+    }
+
+    // ── Persist and notify ───────────────────────────────────────────────
+    this.switches.set(ip, updated);
+    this.enrichedIps.add(ip);
+    this.emit('switch:updated', updated);
+
+    console.log(
+      `[Discovery] Enriched ${ip}: ${updated.portsUp}/${updated.portCount} ports up` +
+        (updated.groups ? `, ${updated.groups.length} groups` : '') +
+        (updated.poe ? `, PoE ${updated.poe.drawW}/${updated.poe.budgetW}W` : ''),
+    );
+  }
+
+  /**
+   * Parse a speed string (e.g. "1G", "100M", "10G", "auto") into Mbps.
+   */
+  private parseSpeedMbps(speed: string): number {
+    if (!speed || speed === 'auto') return 0;
+    const upper = speed.toUpperCase();
+    if (upper.includes('10G')) return 10_000;
+    if (upper.includes('1G')) return 1000;
+    if (upper.includes('100M')) return 100;
+    if (upper.includes('10M')) return 10;
+    const num = parseInt(speed, 10);
+    return isNaN(num) ? 0 : num;
+  }
+
+  /**
+   * Derive the maximum port speed from the physical port type.
+   */
+  private parseMaxSpeedMbps(portType: string): number {
+    switch (portType) {
+      case 'sfp+':
+        return 10_000;
+      case 'sfp':
+        return 1000;
+      case 'copper':
+      default:
+        return 1000;
     }
   }
 
