@@ -18,6 +18,16 @@ import ProfilesView from './views/ProfilesView';
 import LogsView from './views/LogsView';
 import TroubleshootView from './views/TroubleshootView';
 import SettingsView from './views/SettingsView';
+import NamingView from './views/NamingView';
+import { ShowFileView } from './views/ShowFileView';
+import TourManagerView from './views/TourManagerView';
+import FleetView from './views/FleetView';
+import MulticastFlowView from './views/MulticastFlowView';
+import RedundancyView from './views/RedundancyView';
+import AuditTrailView from './views/AuditTrailView';
+import OfflineDesignView from './views/OfflineDesignView';
+import RemoteMonitorView from './views/RemoteMonitorView';
+import CableScheduleView from './views/CableScheduleView';
 
 const viewComponents: Record<string, React.ComponentType> = {
   [VIEWS.SCANNER]: ScannerView,
@@ -30,6 +40,16 @@ const viewComponents: Record<string, React.ComponentType> = {
   [VIEWS.BATCH_CONFIG]: BatchConfigView,
   [VIEWS.EXCEL_IMPORT]: ExcelImportView,
   [VIEWS.PROFILES]: ProfilesView,
+  [VIEWS.NAMING]: NamingView,
+  [VIEWS.SHOW_FILE]: ShowFileView,
+  [VIEWS.TOUR_MANAGER]: TourManagerView,
+  [VIEWS.FLEET]: FleetView,
+  [VIEWS.MULTICAST_FLOW]: MulticastFlowView,
+  [VIEWS.REDUNDANCY]: RedundancyView,
+  [VIEWS.AUDIT_TRAIL]: AuditTrailView,
+  [VIEWS.OFFLINE_DESIGN]: OfflineDesignView,
+  [VIEWS.REMOTE_MONITOR]: RemoteMonitorView,
+  [VIEWS.CABLE_SCHEDULE]: CableScheduleView,
   [VIEWS.LOGS]: LogsView,
   [VIEWS.TROUBLESHOOT]: TroubleshootView,
   [VIEWS.SETTINGS]: SettingsView,

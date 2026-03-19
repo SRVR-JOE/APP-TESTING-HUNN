@@ -2,6 +2,8 @@ import { create } from 'zustand';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+import type { LocationType } from '@shared/types';
+
 export interface RackGroupData {
   id: string;
   name: string;
@@ -9,6 +11,7 @@ export interface RackGroupData {
   positionX: number;
   positionY: number;
   width: number;
+  locationType?: LocationType;
 }
 
 export interface MiniPortInfo {

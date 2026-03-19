@@ -15,7 +15,9 @@ import {
   EyeOff,
   AlertTriangle,
   CheckCircle2,
+  Shield,
 } from 'lucide-react';
+import APISettingsPanel from '../components/APISettingsPanel';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -47,13 +49,14 @@ interface DisplaySettings {
   temperatureUnit: 'C' | 'F';
 }
 
-type SettingsSection = 'network' | 'polling' | 'retention' | 'display' | 'about';
+type SettingsSection = 'network' | 'polling' | 'retention' | 'display' | 'api' | 'about';
 
 const SECTION_ITEMS: { key: SettingsSection; label: string; icon: React.ReactNode }[] = [
   { key: 'network', label: 'Network', icon: <Network size={16} /> },
   { key: 'polling', label: 'Polling', icon: <Timer size={16} /> },
   { key: 'retention', label: 'Data Retention', icon: <Database size={16} /> },
   { key: 'display', label: 'Display', icon: <Monitor size={16} /> },
+  { key: 'api', label: 'API & Integrations', icon: <Shield size={16} /> },
   { key: 'about', label: 'About', icon: <Info size={16} /> },
 ];
 
@@ -647,6 +650,9 @@ export default function SettingsView() {
             </SettingRow>
           </SectionCard>
         )}
+
+        {/* ── API & Integrations ──────────────────────────────────── */}
+        {activeSection === 'api' && <APISettingsPanel />}
 
         {/* ── About ────────────────────────────────────────────────── */}
         {activeSection === 'about' && (
